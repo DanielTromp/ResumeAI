@@ -86,12 +86,12 @@ def correct_markdown_with_llm(text):
                 {"role": "system", "content": "Je bent een assistent die markdown corrigeert en verbetert, zonder feedback te geven en de tekst niet in een eigen markdown blok zetten."},
                 {"role": "user", "content": f"Corrigeer en verbeter de volgende markdown:\n{text}\n\nGecorrigeerde markdown:"}
             ],
-            max_tokens=500
+            max_tokens=4000
         )
         return response.choices[0].message["content"].strip()
     except Exception as e:
         print(f"An error occurred: {e}")
-        return None
+        return text
 
 def extract_data_from_html(html, url):
     """Extracts structured data from HTML and converts it to Markdown."""
@@ -181,7 +181,7 @@ async def main():
                 aanvraag_links.update(links)
             else:
                 print("Error:", result.error_message)
-        new_listings = sorted(aanvraag_links - existing_listings)
+        new_listings = sorted(aanvraag_links - existing_listings, reverse=True)[:10]
 
         if not new_listings:
             print("No new listings found.")
