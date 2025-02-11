@@ -1,10 +1,8 @@
 #! /usr/bin/env python3
-# This script crawls Spinweb and extracts new listings, then uploads them to Nextcloud and Airtable
+# This script crawls Spinweb and extracts new listings and uploads them to Airtable
 import asyncio
 import re
-import json
 import os
-import requests
 import datetime
 from pyairtable import Api
 from bs4 import BeautifulSoup
@@ -19,10 +17,6 @@ load_dotenv()
 USER = os.getenv("SPINWEB_USER")
 PASSWORD = os.getenv("SPINWEB_PASS")
 LOGIN_URL = os.getenv("SPINWEB_LOGIN")
-NEXTCLOUD_URL = "https://nextcloud.trmp.cc/remote.php/dav/files/"
-NEXTCLOUD_USER = os.getenv("NEXTCLOUD_USER")
-NEXTCLOUD_PASS = os.getenv("NEXTCLOUD_PASS")
-NEXTCLOUD_FOLDER = "ResumeAI"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 AIRTABLE_API_KEY = os.getenv("AIRTABLE_API_KEY")
 AIRTABLE_BASE_ID = os.getenv("AIRTABLE_BASE_ID")
@@ -30,27 +24,60 @@ AIRTABLE_TABLE_NAME = os.getenv("AIRTABLE_TABLE_NAME")
 SOURCE_URL = os.getenv("SOURCE_URL")
 PROVIDER_NAME = os.getenv("PROVIDER_NAME", "provider")
 
+def get_table_schema():
+    """Debug function to print table structure."""
+    api = Api(AIRTABLE_API_KEY)
+    table = api.table(AIRTABLE_BASE_ID, "tblh98RUPxcfS3TvD")
+    
+    try:
+        record = table.first()
+        if record:
+            print("Available fields:", record['fields'].keys())
+        else:
+            print("No records found in table")
+    except Exception as e:
+        print(f"Error getting table schema: {e}")
+
+def get_existing_listings():
+    """Get list of already processed listings from Airtable."""
+    api = Api(AIRTABLE_API_KEY)
+    table = api.table(AIRTABLE_BASE_ID, "tblh98RUPxcfS3TvD")
+    
+    try:
+        records = table.all()
+        return {record['fields']['Listing'] for record in records if 'Listing' in record['fields']}
+    except Exception as e:
+        print(f"Error getting existing listings from Airtable: {e}")
+        return set()
+
+def add_processed_listing(listing_url):
+    """Add a processed listing URL to Airtable."""
+    api = Api(AIRTABLE_API_KEY)
+    table = api.table(AIRTABLE_BASE_ID, "tblh98RUPxcfS3TvD")
+    
+    try:
+        table.create({"Listing": listing_url})
+        print(f"Added {listing_url} to processed listings")
+    except Exception as e:
+        print(f"Error adding listing to processed listings: {e}")
 
 def add_to_airtable(markdown_data, listing_url):
     """Adds a new listing to Airtable."""
     api = Api(AIRTABLE_API_KEY)
     table = api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME)
     
-    # Rest of the function remains the same
     lines = markdown_data.split('\n')
     data = {
         'URL': listing_url,
-        'Status': 'New'  # Default status
+        'Status': 'New'
     }
     
-    # Extract information from markdown lines
     for line in lines:
         if line.startswith('- **'):
             key_value = line.replace('- **', '').split(':** ')
             if len(key_value) == 2:
                 key, value = key_value
                 
-                # Map the fields to Airtable columns
                 if key == 'Functie':
                     data['Functie'] = value
                 elif key == 'Klant':
@@ -60,6 +87,7 @@ def add_to_airtable(markdown_data, listing_url):
                 elif key == 'Regio':
                     data['Regio'] = value
                 elif key == 'Uren':
+                    value = value.replace("onbekend", "").strip()
                     data['Uren'] = value
                 elif key == 'Tarief':
                     data['Tarief'] = value
@@ -76,10 +104,8 @@ def add_to_airtable(markdown_data, listing_url):
                     except:
                         data['Sluiting'] = value
 
-    # Extract functieomschrijving
     sections = markdown_data.split('## Functieomschrijving')
     if len(sections) > 1:
-        # Neem de laatste sectie (na de laatste "## Functieomschrijving")
         functieomschrijving = sections[-1].strip()
         data['Functieomschrijving'] = functieomschrijving
 
@@ -89,32 +115,8 @@ def add_to_airtable(markdown_data, listing_url):
     except Exception as e:
         print(f"Error adding listing to Airtable: {e}")
 
-def nextcloud_upload(file_name, data, is_json=True):
-    """Uploads a file to Nextcloud, allowing overwriting."""
-    url = f"{NEXTCLOUD_URL}{NEXTCLOUD_USER}/{NEXTCLOUD_FOLDER}/{file_name}"
-    headers = {"Content-Type": "application/json"} if is_json else {}
-    content = json.dumps(data, indent=4) if is_json else data
-    response = requests.put(url, auth=(NEXTCLOUD_USER, NEXTCLOUD_PASS), data=content, headers=headers)
-    if response.status_code in [200, 201, 204]:
-        print(f"Successfully uploaded {file_name} to Nextcloud")
-    else:
-        print(f"Error uploading {file_name} to Nextcloud: {response.status_code} - {response.text}")
-
-def nextcloud_download(file_name):
-    """Downloads a file from Nextcloud."""
-    url = f"{NEXTCLOUD_URL}{NEXTCLOUD_USER}/{NEXTCLOUD_FOLDER}/{file_name}"
-    response = requests.get(url, auth=(NEXTCLOUD_USER, NEXTCLOUD_PASS))
-    if response.status_code == 200:
-        return json.loads(response.text) if file_name.endswith(".json") else response.text
-    elif response.status_code == 404:
-        print(f"{file_name} not found in Nextcloud. Returning empty data.")
-        return []
-    else:
-        print(f"Error downloading {file_name} from Nextcloud: {response.status_code} - {response.text}")
-        return []
-
 def correct_markdown_with_llm(text):
-    """Uses OpenAI LLM (GPT-4o) to correct and improve markdown formatting."""
+    """Uses OpenAI LLM to correct and improve markdown formatting."""
     try:
         response = openai.chat.completions.create(
             model="gpt-4o-mini",
@@ -149,7 +151,6 @@ def extract_data_from_html(html, url):
     markdown_output += "- **Functie:** " + (functie.get_text(strip=True) if functie else "Onbekend") + "\n"
     markdown_output += "- **Klant:** " + (klant.get_text(strip=True) if klant else "Onbekend") + "\n"
     for key, value in aanvraag_info.items():
-        # Opschonen van de Uren waarde
         if key == "Uren":
             value = value.replace("onbekend", "").strip()
         markdown_output += f"- **{key}:** {value}\n"
@@ -160,50 +161,10 @@ def extract_data_from_html(html, url):
     
     return markdown_output
 
-def get_table_schema():
-    """Debug function to print table structure."""
-    api = Api(AIRTABLE_API_KEY)
-    table = api.table(AIRTABLE_BASE_ID, "tblh98RUPxcfS3TvD")
-    
-    try:
-        # Haal één record op om de veldnamen te zien
-        record = table.first()
-        if record:
-            print("Available fields:", record['fields'].keys())
-        else:
-            print("No records found in table")
-    except Exception as e:
-        print(f"Error getting table schema: {e}")
-
-def get_existing_listings():
-    """Get list of already processed listings from Airtable."""
-    api = Api(AIRTABLE_API_KEY)
-    table = api.table(AIRTABLE_BASE_ID, "tblh98RUPxcfS3TvD")  # Gebruik de tabel ID
-    
-    try:
-        # Haal alle records op
-        records = table.all()
-        # Gebruik 'Listing' als kolomnaam
-        return {record['fields']['Listing'] for record in records if 'Listing' in record['fields']}
-    except Exception as e:
-        print(f"Error getting existing listings from Airtable: {e}")
-        return set()
-
-def add_processed_listing(listing_url):
-    """Add a processed listing URL to Airtable."""
-    api = Api(AIRTABLE_API_KEY)
-    table = api.table(AIRTABLE_BASE_ID, "tblh98RUPxcfS3TvD")  # Gebruik de tabel ID
-    
-    try:
-        table.create({"Listing": listing_url})  # Gebruik 'Listing' als kolomnaam
-        print(f"Added {listing_url} to processed listings")
-    except Exception as e:
-        print(f"Error adding listing to processed listings: {e}")
-
 async def main():
     print("🔗 Starting vacancy scraper")
 
-    get_table_schema()  # Verwijder await, functie is niet async
+    get_table_schema()
 
     md_generator = DefaultMarkdownGenerator(
         options={
@@ -246,7 +207,6 @@ async def main():
 
     await crawler.start()
 
-    # Crawl URLs to find new listings
     if not SOURCE_URL:
         print("Error: No source URL configured in environment variables.")
         return
@@ -268,10 +228,6 @@ async def main():
                 if result.success:
                     print(f"Crawled URL: {listing_url}")
                     markdown_data = extract_data_from_html(result.html, listing_url)
-                    
-                    # Upload to Nextcloud
-                    md_file_name = f"{PROVIDER_NAME}/aanvragen/{listing_url.split('/')[-1]}.md"
-                    nextcloud_upload(md_file_name, markdown_data, is_json=False)
                     
                     # Add to Airtable
                     add_to_airtable(markdown_data, listing_url)
