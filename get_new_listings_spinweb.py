@@ -31,7 +31,6 @@ import sys
 # Third-party imports
 from bs4 import BeautifulSoup
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode
-from crawl4ai.markdown_generation_strategy import DefaultMarkdownGenerator
 from dotenv import load_dotenv
 import openai
 from playwright.async_api import Page, BrowserContext
@@ -275,152 +274,6 @@ class AirtableClient:
         except AttributeError as e:
             self.logger.error("Missing required table configuration: %s", e)
 
-def get_table_schema():
-    """Debug function to print table structure."""
-    logger = logging.getLogger(__name__)
-    try:
-        api = Api(AIRTABLE_API_KEY)
-        table = api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME_PROCESSED)
-        record = table.first()
-
-        if record:
-            logger.info("Available fields: %s", list(record['fields'].keys()))
-        else:
-            logger.info("No records found in table")
-
-    except requests.RequestException as e:
-        logger.error("Network error getting table schema: %s", e)
-    except KeyError as e:
-        logger.error("Invalid table structure: %s", e)
-    except (TypeError, ValueError) as e:
-        logger.error("Data type error in table schema: %s", e)
-    except AttributeError as e:
-        logger.error("Missing required table configuration: %s", e)
-
-def get_existing_listings():
-    """Get list of already processed listings from Airtable."""
-    logger = logging.getLogger(__name__)
-    try:
-        api = Api(AIRTABLE_API_KEY)
-        table = api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME_LISTINGS)
-
-        # Haal alle records op
-        records = table.all()
-        # Verzamel listings
-        listings = {record['fields']['Listing']
-                   for record in records
-                   if 'Listing' in record['fields']}
-
-        logger.info("Found %d existing listings", len(listings))
-        return listings
-
-    except requests.RequestException as e:
-        logger.error("Network error getting listings from Airtable: %s", e)
-        return set()
-    except KeyError as e:
-        logger.error("Data structure error in Airtable response: %s", e)
-        return set()
-    except (TypeError, ValueError) as e:
-        logger.error("Data format error in Airtable response: %s", e)
-        return set()
-    except AttributeError as e:
-        logger.error("Missing required Airtable configuration: %s", e)
-        return set()
-
-def add_processed_listing(listing_url):
-    """Add a processed listing URL to Airtable."""
-    logger = logging.getLogger(__name__)
-    try:
-        api = Api(AIRTABLE_API_KEY)
-        table = api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME_LISTINGS)
-        table.create({"Listing": listing_url})
-        logger.info("Added %s to processed listings", listing_url)
-    except requests.RequestException as e:
-        logger.error("Network error adding listing to Airtable: %s", e)
-    except ValueError as e:
-        logger.error("Invalid data format for listing: %s", e)
-    except KeyError as e:
-        logger.error("Missing required field in listing data: %s", e)
-    except TypeError as e:
-        logger.error("Invalid data type in listing: %s", e)
-    except AttributeError as e:
-        logger.error("Missing required Airtable configuration: %s", e)
-
-def add_to_airtable(markdown_data, listing_url):
-    """Adds or updates a listing in Airtable."""
-    logger = logging.getLogger(__name__)
-    try:
-        api = Api(AIRTABLE_API_KEY)
-        table = api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME_PROCESSED)
-
-        lines = markdown_data.split('\n')
-        data = {
-            'URL': listing_url,
-            'Status': 'New'
-        }
-
-        # Extract data from markdown
-        for line in lines:
-            if line.startswith('- **'):
-                key_value = line.replace('- **', '').split(':** ')
-                if len(key_value) == 2:
-                    key, value = key_value
-                    if key == 'Functie':
-                        data['Functie'] = value
-                    elif key == 'Klant':
-                        data['Klant'] = value
-                    elif key == 'Branche':
-                        data['Branche'] = value
-                    elif key == 'Regio':
-                        data['Regio'] = value
-                    elif key == 'Uren':
-                        value = value.replace("onbekend", "").strip()
-                        data['Uren'] = value
-                    elif key == 'Tarief':
-                        data['Tarief'] = value
-                    elif key == 'Geplaatst':
-                        try:
-                            date_obj = datetime.datetime.strptime(value, '%d-%m-%Y')
-                            data['Geplaatst'] = date_obj.strftime('%Y-%m-%d')
-                        except ValueError as e:
-                            logger.error("Error parsing 'Geplaatst' date: %s", e)
-                            data['Geplaatst'] = value
-                    elif key == 'Sluiting':
-                        try:
-                            date_obj = datetime.datetime.strptime(value, '%d-%m-%Y')
-                            data['Sluiting'] = date_obj.strftime('%Y-%m-%d')
-                        except ValueError as e:
-                            logger.error("Error parsing 'Sluiting' date: %s", e)
-                            data['Sluiting'] = value
-
-        sections = markdown_data.split('## Functieomschrijving')
-        if len(sections) > 1:
-            functieomschrijving = sections[-1].strip()
-            data['Functieomschrijving'] = functieomschrijving
-
-        # Zoek bestaande record met dezelfde URL
-        existing_records = table.all(formula=f"URL = '{listing_url}'")
-
-        if existing_records:
-            # Update bestaande record
-            record_id = existing_records[0]['id']
-            table.update(record_id, data)
-            logger.info("Successfully updated listing %s in Airtable", listing_url)
-        else:
-            # Maak nieuwe record
-            table.create(data)
-            logger.info("Successfully added listing %s to Airtable", listing_url)
-    except requests.RequestException as e:
-        logger.error("Network error adding/updating listing in Airtable: %s", e)
-    except ValueError as e:
-        logger.error("Invalid data format for listing: %s", e)
-    except KeyError as e:
-        logger.error("Missing required field in listing data: %s", e)
-    except TypeError as e:
-        logger.error("Invalid data type in listing: %s", e)
-    except AttributeError as e:
-        logger.error("Missing required Airtable configuration: %s", e)
-
 def correct_markdown_with_llm(text: str) -> tuple[str, dict]:
     """Corrigeert de markdown-opmaak met behulp van het OpenAI API."""
     logger = logging.getLogger(__name__)
@@ -558,19 +411,12 @@ async def main():
     airtable = AirtableClient()
     airtable.get_table_schema()
 
-    md_generator = DefaultMarkdownGenerator(
-        options={
-            "ignore_images": True
-        }
-    )
-
     browser_config = BrowserConfig(
         headless=True,
         verbose=True
     )
 
     crawler_run_config = CrawlerRunConfig(
-        markdown_generator=md_generator,
         js_code="window.scrollTo(0, document.body.scrollHeight);",
         wait_for="body",
         cache_mode=CacheMode.BYPASS
