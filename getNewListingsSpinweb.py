@@ -17,12 +17,13 @@ load_dotenv()
 USER = os.getenv("SPINWEB_USER")
 PASSWORD = os.getenv("SPINWEB_PASS")
 LOGIN_URL = os.getenv("SPINWEB_LOGIN")
+SOURCE_URL = os.getenv("SOURCE_URL")
+PROVIDER_NAME = os.getenv("PROVIDER_NAME", "provider")
+
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 AIRTABLE_API_KEY = os.getenv("AIRTABLE_API_KEY")
 AIRTABLE_BASE_ID = os.getenv("AIRTABLE_BASE_ID")
 AIRTABLE_TABLE_NAME = os.getenv("AIRTABLE_TABLE_NAME")
-SOURCE_URL = os.getenv("SOURCE_URL")
-PROVIDER_NAME = os.getenv("PROVIDER_NAME", "provider")
 
 def get_table_schema():
     """Debug function to print table structure."""
@@ -44,8 +45,16 @@ def get_existing_listings():
     table = api.table(AIRTABLE_BASE_ID, "tblh98RUPxcfS3TvD")
     
     try:
+        # Haal alle records op
         records = table.all()
-        return {record['fields']['Listing'] for record in records if 'Listing' in record['fields']}
+        # Verzamel listings
+        listings = {record['fields']['Listing'] 
+                   for record in records 
+                   if 'Listing' in record['fields']}
+        
+        print(f"Found {len(listings)} existing listings")
+        return listings
+        
     except Exception as e:
         print(f"Error getting existing listings from Airtable: {e}")
         return set()
@@ -62,7 +71,7 @@ def add_processed_listing(listing_url):
         print(f"Error adding listing to processed listings: {e}")
 
 def add_to_airtable(markdown_data, listing_url):
-    """Adds a new listing to Airtable."""
+    """Adds or updates a listing in Airtable."""
     api = Api(AIRTABLE_API_KEY)
     table = api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME)
     
@@ -72,6 +81,7 @@ def add_to_airtable(markdown_data, listing_url):
         'Status': 'New'
     }
     
+    # Extract data from markdown
     for line in lines:
         if line.startswith('- **'):
             key_value = line.replace('- **', '').split(':** ')
@@ -110,10 +120,20 @@ def add_to_airtable(markdown_data, listing_url):
         data['Functieomschrijving'] = functieomschrijving
 
     try:
-        table.create(data)
-        print(f"Successfully added listing {listing_url} to Airtable")
+        # Zoek bestaande record met dezelfde URL
+        existing_records = table.all(formula=f"URL = '{listing_url}'")
+        
+        if existing_records:
+            # Update bestaande record
+            record_id = existing_records[0]['id']
+            table.update(record_id, data)
+            print(f"Successfully updated listing {listing_url} in Airtable")
+        else:
+            # Maak nieuwe record
+            table.create(data)
+            print(f"Successfully added listing {listing_url} to Airtable")
     except Exception as e:
-        print(f"Error adding listing to Airtable: {e}")
+        print(f"Error adding/updating listing to Airtable: {e}")
 
 def correct_markdown_with_llm(text):
     """Uses OpenAI LLM to correct and improve markdown formatting."""
@@ -218,11 +238,15 @@ async def main():
         vacancy_links = set(f"https://{PROVIDER_NAME}" + link for link in re.findall(r'/aanvraag/\d+', result.html))
         
         existing_listings = get_existing_listings()
-        new_listings = sorted(vacancy_links - existing_listings, reverse=True)[:10]
+        # Filter op basis van referentie nummer 863660
+        new_listings = {link for link in vacancy_links - existing_listings
+                       if int(link.split('/')[-1]) > 863693}
+        new_listings = sorted(new_listings)  # Sorteer van oud naar nieuw
 
         if not new_listings:
             print("No new listings found.")
         else:
+            print(f"Found {len(new_listings)} new listings to process")
             for listing_url in new_listings.copy():
                 result = await crawler.arun(listing_url, config=crawler_run_config)
                 if result.success:
