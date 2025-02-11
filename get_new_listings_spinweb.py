@@ -2,22 +2,21 @@
 """
 Spinweb Vacancy Scraper
 
-Dit script crawlt de Spinweb website om nieuwe vacatures 
-    te vinden en deze naar Airtable te uploaden.
+Dit script crawlt de Spinweb website om nieuwe vacatures te vinden en deze naar Airtable te uploaden.
 Het voert de volgende taken uit:
 1. Inloggen op Spinweb
 2. Ophalen van nieuwe vacature listings
 3. Vergelijken met bestaande listings in Airtable
 4. Extractie van vacature details
-5. Opslaan van nieuwe vacatures in Airtable
-6. Bijhouden van verwerkte listings
+5. Uploaden van nieuwe vacatures naar Airtable
 
-Vereist environment variabelen (zie .env.example):
-- OPENAI_API_KEY: Voor het corrigeren van markdown
-- AIRTABLE_API_KEY: Voor toegang tot Airtable
-- AIRTABLE_BASE_ID: ID van de Airtable base
-- SPINWEB_USER: Spinweb gebruikersnaam
-- SPINWEB_PASS: Spinweb wachtwoord
+Author: Daniel Tromp
+Email: drpgmtromp@gmail.com
+Version: 1.0.0
+Created: 2025-02-11
+Updated: 2025-02-11
+License: MIT
+Repository: https://github.com/DanielTromp/ResumeAI
 """
 
 # Standaard bibliotheek imports
