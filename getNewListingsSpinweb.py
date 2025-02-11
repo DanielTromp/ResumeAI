@@ -135,20 +135,24 @@ def add_to_airtable(markdown_data, listing_url):
     except Exception as e:
         print(f"Error adding/updating listing to Airtable: {e}")
 
-def correct_markdown_with_llm(text):
-    """Uses OpenAI LLM to correct and improve markdown formatting."""
+def correct_markdown_with_llm(text: str) -> str:
+    """Corrigeert de markdown-opmaak met behulp van het OpenAI API."""
+    client = openai.OpenAI(api_key=OPENAI_API_KEY)
+    
     try:
-        response = openai.chat.completions.create(
+        response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "Je bent een assistent die markdown corrigeert en verbetert, zonder feedback te geven en de tekst niet in een eigen markdown blok zetten."},
-                {"role": "user", "content": f"Corrigeer en verbeter de volgende markdown:\n{text}\n\nGecorrigeerde markdown:"}
+                {"role": "system", "content": "Je taak is om markdown-opmaak te corrigeren. Behoud de inhoud exact, verbeter alleen de opmaak."},
+                {"role": "user", "content": text}
             ],
-            max_tokens=4000
+            temperature=0.0,
+            max_tokens=4000,
+            timeout=30
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
-        print(f"An error occurred: {e}")
+        print(f"Er is een fout opgetreden bij OpenAI: {e}")
         return text
 
 def extract_data_from_html(html, url):
