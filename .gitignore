@@ -1,6 +1,7 @@
 .env
 /venv
 /old
+ResumeAI.code-workspace
 
 ######################
 # Default .gitignore #
