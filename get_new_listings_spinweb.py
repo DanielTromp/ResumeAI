@@ -491,8 +491,16 @@ async def main():
                     logger.info("Crawled URL: %s", listing_url)
                     markdown_data = extract_data_from_html(result.html, listing_url)
 
-                    airtable.add_to_airtable(markdown_data, listing_url)
-                    airtable.add_processed_listing(listing_url)
+                    try:
+                        # Eerst proberen de aanvraag toe te voegen
+                        airtable.add_to_airtable(markdown_data, listing_url)
+                        # Alleen als dat succesvol was, markeren als verwerkt
+                        airtable.add_processed_listing(listing_url)
+                        logger.info("Succesvol verwerkt en gemarkeerd: %s", listing_url)
+                    except Exception as e:
+                        logger.error("Fout bij toevoegen aan Airtable, listing wordt niet gemarkeerd als verwerkt: %s - %s",
+                                   listing_url, str(e))
+                        continue  # Ga door met de volgende listing
 
                     new_listings.remove(listing_url)
                 else:
