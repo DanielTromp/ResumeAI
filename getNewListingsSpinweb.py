@@ -23,13 +23,14 @@ PROVIDER_NAME = os.getenv("PROVIDER_NAME", "provider")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 AIRTABLE_API_KEY = os.getenv("AIRTABLE_API_KEY")
 AIRTABLE_BASE_ID = os.getenv("AIRTABLE_BASE_ID")
-AIRTABLE_TABLE_NAME = os.getenv("AIRTABLE_TABLE_NAME")
+AIRTABLE_TABLE_NAME_PROCESSED = os.getenv("AIRTABLE_TABLE_NAME_PROCESSED")
+AIRTABLE_TABLE_NAME_LISTINGS = os.getenv("AIRTABLE_TABLE_NAME_LISTINGS")
 
 def get_table_schema():
     """Debug function to print table structure."""
     api = Api(AIRTABLE_API_KEY)
-    table = api.table(AIRTABLE_BASE_ID, "tblh98RUPxcfS3TvD")
-    
+    table = api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME_LISTINGS)
+
     try:
         record = table.first()
         if record:
@@ -42,8 +43,8 @@ def get_table_schema():
 def get_existing_listings():
     """Get list of already processed listings from Airtable."""
     api = Api(AIRTABLE_API_KEY)
-    table = api.table(AIRTABLE_BASE_ID, "tblh98RUPxcfS3TvD")
-    
+    table = api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME_PROCESSED)
+
     try:
         # Haal alle records op
         records = table.all()
@@ -51,10 +52,10 @@ def get_existing_listings():
         listings = {record['fields']['Listing'] 
                    for record in records 
                    if 'Listing' in record['fields']}
-        
+
         print(f"Found {len(listings)} existing listings")
         return listings
-        
+
     except Exception as e:
         print(f"Error getting existing listings from Airtable: {e}")
         return set()
@@ -62,8 +63,8 @@ def get_existing_listings():
 def add_processed_listing(listing_url):
     """Add a processed listing URL to Airtable."""
     api = Api(AIRTABLE_API_KEY)
-    table = api.table(AIRTABLE_BASE_ID, "tblh98RUPxcfS3TvD")
-    
+    table = api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME_PROCESSED)
+
     try:
         table.create({"Listing": listing_url})
         print(f"Added {listing_url} to processed listings")
@@ -73,21 +74,20 @@ def add_processed_listing(listing_url):
 def add_to_airtable(markdown_data, listing_url):
     """Adds or updates a listing in Airtable."""
     api = Api(AIRTABLE_API_KEY)
-    table = api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME)
-    
+    table = api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME_LISTINGS)
+
     lines = markdown_data.split('\n')
     data = {
         'URL': listing_url,
         'Status': 'New'
     }
-    
+
     # Extract data from markdown
     for line in lines:
         if line.startswith('- **'):
             key_value = line.replace('- **', '').split(':** ')
             if len(key_value) == 2:
                 key, value = key_value
-                
                 if key == 'Functie':
                     data['Functie'] = value
                 elif key == 'Klant':
@@ -122,7 +122,7 @@ def add_to_airtable(markdown_data, listing_url):
     try:
         # Zoek bestaande record met dezelfde URL
         existing_records = table.all(formula=f"URL = '{listing_url}'")
-        
+
         if existing_records:
             # Update bestaande record
             record_id = existing_records[0]['id']
@@ -138,12 +138,14 @@ def add_to_airtable(markdown_data, listing_url):
 def correct_markdown_with_llm(text: str) -> str:
     """Corrigeert de markdown-opmaak met behulp van het OpenAI API."""
     client = openai.OpenAI(api_key=OPENAI_API_KEY)
-    
+
     try:
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "Je taak is om markdown-opmaak te corrigeren. Behoud de inhoud exact, verbeter alleen de opmaak."},
+                {"role": "system", "content":
+                    "Je taak is om markdown-opmaak te corrigeren."
+                    "Behoud de inhoud exact, verbeter alleen de opmaak."},
                 {"role": "user", "content": text}
             ],
             temperature=0.0,
@@ -158,11 +160,11 @@ def correct_markdown_with_llm(text: str) -> str:
 def extract_data_from_html(html, url):
     """Extracts structured data from HTML and converts it to Markdown."""
     soup = BeautifulSoup(html, "html.parser")
-    
+
     functie = soup.select_one(".title-page--text")
     klant = soup.select_one(".application-customer .dynamic-truncate")
     functieomschrijving = soup.select_one(".application-content")
-    
+
     aanvraag_info = {}
     for item in soup.select(".application-info--item"):
         label = item.select_one(".application-info--label")
@@ -178,11 +180,11 @@ def extract_data_from_html(html, url):
         if key == "Uren":
             value = value.replace("onbekend", "").strip()
         markdown_output += f"- **{key}:** {value}\n"
-    
+
     functieomschrijving_text = functieomschrijving.get_text(separator='\n', strip=True) if functieomschrijving else "Geen omschrijving beschikbaar."
     verbeterde_functieomschrijving = correct_markdown_with_llm(functieomschrijving_text)
     markdown_output += "\n## Functieomschrijving\n" + verbeterde_functieomschrijving + "\n\n"
-    
+
     return markdown_output
 
 async def main():
@@ -238,9 +240,8 @@ async def main():
     result = await crawler.arun(SOURCE_URL, config=crawler_run_config)
     if result.success:
         print("\nCrawled URL:", result.url)
-        print("HTML length:", len(result.html))
         vacancy_links = set(f"https://{PROVIDER_NAME}" + link for link in re.findall(r'/aanvraag/\d+', result.html))
-        
+
         existing_listings = get_existing_listings()
         # Filter op basis van referentie nummer 863660
         new_listings = {link for link in vacancy_links - existing_listings
@@ -256,13 +257,13 @@ async def main():
                 if result.success:
                     print(f"Crawled URL: {listing_url}")
                     markdown_data = extract_data_from_html(result.html, listing_url)
-                    
+
                     # Add to Airtable
                     add_to_airtable(markdown_data, listing_url)
-                    
+
                     # Add to processed listings
                     add_processed_listing(listing_url)
-                    
+
                     new_listings.remove(listing_url)
                 else:
                     print(f"Error crawling {listing_url}: {result.error_message}")
