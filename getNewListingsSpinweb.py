@@ -76,8 +76,10 @@ def add_to_airtable(markdown_data, listing_url):
                         data['Sluiting'] = value
 
     # Extract functieomschrijving
-    if '## Functieomschrijving' in markdown_data:
-        functieomschrijving = markdown_data.split('## Functieomschrijving')[1].strip()
+    sections = markdown_data.split('## Functieomschrijving')
+    if len(sections) > 1:
+        # Neem de laatste sectie (na de laatste "## Functieomschrijving")
+        functieomschrijving = sections[-1].strip()
         data['Functieomschrijving'] = functieomschrijving
 
     try:
@@ -146,6 +148,9 @@ def extract_data_from_html(html, url):
     markdown_output += "- **Functie:** " + (functie.get_text(strip=True) if functie else "Onbekend") + "\n"
     markdown_output += "- **Klant:** " + (klant.get_text(strip=True) if klant else "Onbekend") + "\n"
     for key, value in aanvraag_info.items():
+        # Opschonen van de Uren waarde
+        if key == "Uren":
+            value = value.replace("onbekend", "").strip()
         markdown_output += f"- **{key}:** {value}\n"
     
     functieomschrijving_text = functieomschrijving.get_text(separator='\n', strip=True) if functieomschrijving else "Geen omschrijving beschikbaar."
