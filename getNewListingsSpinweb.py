@@ -18,6 +18,7 @@ import openai
 load_dotenv()
 USER = os.getenv("SPINWEB_USER")
 PASSWORD = os.getenv("SPINWEB_PASS")
+LOGIN_URL = os.getenv("SPINWEB_LOGIN")
 NEXTCLOUD_URL = "https://nextcloud.trmp.cc/remote.php/dav/files/"
 NEXTCLOUD_USER = os.getenv("NEXTCLOUD_USER")
 NEXTCLOUD_PASS = os.getenv("NEXTCLOUD_PASS")
@@ -159,8 +160,50 @@ def extract_data_from_html(html, url):
     
     return markdown_output
 
+def get_table_schema():
+    """Debug function to print table structure."""
+    api = Api(AIRTABLE_API_KEY)
+    table = api.table(AIRTABLE_BASE_ID, "tblh98RUPxcfS3TvD")
+    
+    try:
+        # Haal één record op om de veldnamen te zien
+        record = table.first()
+        if record:
+            print("Available fields:", record['fields'].keys())
+        else:
+            print("No records found in table")
+    except Exception as e:
+        print(f"Error getting table schema: {e}")
+
+def get_existing_listings():
+    """Get list of already processed listings from Airtable."""
+    api = Api(AIRTABLE_API_KEY)
+    table = api.table(AIRTABLE_BASE_ID, "tblh98RUPxcfS3TvD")  # Gebruik de tabel ID
+    
+    try:
+        # Haal alle records op
+        records = table.all()
+        # Gebruik 'Listing' als kolomnaam
+        return {record['fields']['Listing'] for record in records if 'Listing' in record['fields']}
+    except Exception as e:
+        print(f"Error getting existing listings from Airtable: {e}")
+        return set()
+
+def add_processed_listing(listing_url):
+    """Add a processed listing URL to Airtable."""
+    api = Api(AIRTABLE_API_KEY)
+    table = api.table(AIRTABLE_BASE_ID, "tblh98RUPxcfS3TvD")  # Gebruik de tabel ID
+    
+    try:
+        table.create({"Listing": listing_url})  # Gebruik 'Listing' als kolomnaam
+        print(f"Added {listing_url} to processed listings")
+    except Exception as e:
+        print(f"Error adding listing to processed listings: {e}")
+
 async def main():
     print("🔗 Starting vacancy scraper")
+
+    get_table_schema()  # Verwijder await, functie is niet async
 
     md_generator = DefaultMarkdownGenerator(
         options={
@@ -185,7 +228,7 @@ async def main():
     async def on_page_context_created(page: Page, context: BrowserContext, **kwargs):
         print("[HOOK] Setting up page & context.")
         try:
-            await page.goto("https://spinweb.nl/inloggen/form", timeout=10000)
+            await page.goto(LOGIN_URL, timeout=10000)
         except Exception as e:
             print(f"Error loading login page: {e}")
             return page
@@ -214,15 +257,12 @@ async def main():
         print("HTML length:", len(result.html))
         vacancy_links = set(f"https://{PROVIDER_NAME}" + link for link in re.findall(r'/aanvraag/\d+', result.html))
         
-        existing_listings = set(nextcloud_download(f"{PROVIDER_NAME}/listings.json"))
+        existing_listings = get_existing_listings()
         new_listings = sorted(vacancy_links - existing_listings, reverse=True)[:10]
 
         if not new_listings:
             print("No new listings found.")
         else:
-            processed_listings = nextcloud_download(f"{PROVIDER_NAME}/listings.json")
-            if not isinstance(processed_listings, list):
-                processed_listings = []
             for listing_url in new_listings.copy():
                 result = await crawler.arun(listing_url, config=crawler_run_config)
                 if result.success:
@@ -236,11 +276,12 @@ async def main():
                     # Add to Airtable
                     add_to_airtable(markdown_data, listing_url)
                     
-                    processed_listings.append(listing_url)
+                    # Add to processed listings
+                    add_processed_listing(listing_url)
+                    
                     new_listings.remove(listing_url)
                 else:
                     print(f"Error crawling {listing_url}: {result.error_message}")
-            nextcloud_upload(f"{PROVIDER_NAME}/listings.json", processed_listings)
 
     await crawler.close()
 
