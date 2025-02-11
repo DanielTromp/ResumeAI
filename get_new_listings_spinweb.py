@@ -497,10 +497,22 @@ async def main():
                         # Alleen als dat succesvol was, markeren als verwerkt
                         airtable.add_processed_listing(listing_url)
                         logger.info("Succesvol verwerkt en gemarkeerd: %s", listing_url)
-                    except Exception as e:
-                        logger.error("Fout bij toevoegen aan Airtable, listing wordt niet gemarkeerd als verwerkt: %s - %s",
+                    except requests.RequestException as e:
+                        logger.error("Netwerk fout bij toevoegen aan Airtable: %s - %s",
                                    listing_url, str(e))
-                        continue  # Ga door met de volgende listing
+                        continue
+                    except ValueError as e:
+                        logger.error("Ongeldige data voor Airtable: %s - %s",
+                                   listing_url, str(e))
+                        continue
+                    except KeyError as e:
+                        logger.error("Ontbrekend verplicht veld: %s - %s",
+                                   listing_url, str(e))
+                        continue
+                    except (TypeError, AttributeError) as e:
+                        logger.error("Data structuur fout: %s - %s",
+                                   listing_url, str(e))
+                        continue
 
                     new_listings.remove(listing_url)
                 else:
