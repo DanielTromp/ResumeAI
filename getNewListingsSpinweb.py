@@ -29,7 +29,7 @@ AIRTABLE_TABLE_NAME_LISTINGS = os.getenv("AIRTABLE_TABLE_NAME_LISTINGS")
 def get_table_schema():
     """Debug function to print table structure."""
     api = Api(AIRTABLE_API_KEY)
-    table = api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME_LISTINGS)
+    table = api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME_PROCESSED)
 
     try:
         record = table.first()
@@ -43,7 +43,7 @@ def get_table_schema():
 def get_existing_listings():
     """Get list of already processed listings from Airtable."""
     api = Api(AIRTABLE_API_KEY)
-    table = api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME_PROCESSED)
+    table = api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME_LISTINGS)
 
     try:
         # Haal alle records op
@@ -63,7 +63,7 @@ def get_existing_listings():
 def add_processed_listing(listing_url):
     """Add a processed listing URL to Airtable."""
     api = Api(AIRTABLE_API_KEY)
-    table = api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME_PROCESSED)
+    table = api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME_LISTINGS)
 
     try:
         table.create({"Listing": listing_url})
@@ -74,7 +74,7 @@ def add_processed_listing(listing_url):
 def add_to_airtable(markdown_data, listing_url):
     """Adds or updates a listing in Airtable."""
     api = Api(AIRTABLE_API_KEY)
-    table = api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME_LISTINGS)
+    table = api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME_PROCESSED)
 
     lines = markdown_data.split('\n')
     data = {
@@ -105,7 +105,8 @@ def add_to_airtable(markdown_data, listing_url):
                     try:
                         date_obj = datetime.datetime.strptime(value, '%d-%m-%Y')
                         data['Geplaatst'] = date_obj.strftime('%Y-%m-%d')
-                    except:
+                    except ValueError as e:
+                        print(f"Fout bij parsen van datum 'Geplaatst': {e}")
                         data['Geplaatst'] = value
                 elif key == 'Sluiting':
                     try:
@@ -138,7 +139,7 @@ def add_to_airtable(markdown_data, listing_url):
 def correct_markdown_with_llm(text: str) -> str:
     """Corrigeert de markdown-opmaak met behulp van het OpenAI API."""
     client = openai.OpenAI(api_key=OPENAI_API_KEY)
-
+    
     try:
         response = client.chat.completions.create(
             model="gpt-4o-mini",
@@ -152,9 +153,29 @@ def correct_markdown_with_llm(text: str) -> str:
             max_tokens=4000,
             timeout=30
         )
+        
+        # Token gebruik bijhouden
+        input_tokens = response.usage.prompt_tokens
+        output_tokens = response.usage.completion_tokens
+        total_tokens = response.usage.total_tokens
+        
+        print(f"Token gebruik - Input: {input_tokens}, Output: {output_tokens}, Totaal: {total_tokens}")
+        
         return response.choices[0].message.content.strip()
+    except openai.APIError as e:
+        print(f"OpenAI API Error: {e}")
+        return text
+    except openai.RateLimitError as e:
+        print(f"OpenAI Rate Limit bereikt: {e}")
+        return text
+    except openai.APITimeoutError as e:
+        print(f"OpenAI Timeout: {e}")
+        return text
+    except openai.APIConnectionError as e:
+        print(f"OpenAI Connectie probleem: {e}")
+        return text
     except Exception as e:
-        print(f"Er is een fout opgetreden bij OpenAI: {e}")
+        print(f"Onverwachte fout bij OpenAI request: {e}")
         return text
 
 def extract_data_from_html(html, url):
@@ -171,7 +192,7 @@ def extract_data_from_html(html, url):
         value = item.select_one(".application-info--value")
         if label and value:
             aanvraag_info[label.get_text(strip=True)] = value.get_text(strip=True)
-    
+
     markdown_output = "## Aanvraag Informatie\n"
     markdown_output += f"- [🔗 Aanvraag Link]({url})\n"
     markdown_output += "- **Functie:** " + (functie.get_text(strip=True) if functie else "Onbekend") + "\n"
