@@ -4,6 +4,7 @@
 .env
 /venv
 /old
+/resumes
 ResumeAI.code-workspace
 
 ######################
