@@ -26,8 +26,6 @@ import logging
 import logging.handlers
 import os
 import re
-import sys
-import json
 
 # Third-party imports
 from bs4 import BeautifulSoup
@@ -50,8 +48,7 @@ PROVIDER_NAME = os.getenv("PROVIDER_NAME", "provider")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 AIRTABLE_API_KEY = os.getenv("AIRTABLE_API_KEY")
 AIRTABLE_BASE_ID = os.getenv("AIRTABLE_BASE_ID")
-AIRTABLE_TABLE_NAME_PROCESSED = os.getenv("AIRTABLE_TABLE_NAME_PROCESSED")
-AIRTABLE_TABLE_NAME_LISTINGS = os.getenv("AIRTABLE_TABLE_NAME_LISTINGS")
+AIRTABLE_TABLE_NAME_AANVRAGEN = os.getenv("AIRTABLE_TABLE_NAME_AANVRAGEN")
 
 # Configureer logging
 def setup_logging() -> logging.Logger:
@@ -91,8 +88,7 @@ class AirtableClient:
         self.logger = logging.getLogger(__name__)
         try:
             self.api = Api(AIRTABLE_API_KEY)
-            self.listings_table = self.api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME_LISTINGS)
-            self.processed_table = self.api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME_PROCESSED)
+            self.processed_table = self.api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME_AANVRAGEN)
         except requests.RequestException as e:
             self.logger.error("Network error initializing Airtable API: %s", e)
             raise
@@ -114,7 +110,7 @@ class AirtableClient:
     def get_existing_listings(self) -> set:
         """Haalt bestaande listings op uit Airtable."""
         try:
-            records = self.listings_table.all()
+            records = self.processed_table.all()
             listings = {record['fields']['Listing']
                        for record in records
                        if 'Listing' in record['fields']}
@@ -136,7 +132,7 @@ class AirtableClient:
     def get_table_schema(self) -> None:
         """Debug functie om tabel structuur te printen."""
         try:
-            record = self.listings_table.first()
+            record = self.processed_table.first()
             if record:
                 self.logger.info("Available fields: %s", list(record['fields'].keys()))
             else:
@@ -153,7 +149,7 @@ class AirtableClient:
     def add_processed_listing(self, listing_url: str) -> None:
         """Voegt een verwerkte listing URL toe aan Airtable."""
         try:
-            self.listings_table.create({"Listing": listing_url})
+            self.processed_table.create({"Listing": listing_url})
             self.logger.info("Added %s to processed listings", listing_url)
         except requests.RequestException as e:
             self.logger.error("Network error adding listing: %s", e)
@@ -168,16 +164,16 @@ class AirtableClient:
         """Voegt een nieuwe listing toe of werkt bestaande bij in Airtable."""
         try:
             safe_url = self.sanitize_url(listing_url)
-            existing_records = self.listings_table.all(
+            existing_records = self.processed_table.all(
                 formula=f"FIND('{safe_url}', {{Listing}})"
             )
 
             if existing_records:
                 record_id = existing_records[0]['id']
-                self.listings_table.update(record_id, {'Listing': listing_url})
+                self.processed_table.update(record_id, {'Listing': listing_url})
                 self.logger.info("Successfully updated listing %s in Airtable", listing_url)
             else:
-                self.listings_table.create({'Listing': listing_url})
+                self.processed_table.create({'Listing': listing_url})
                 self.logger.info("Successfully added listing %s to Airtable", listing_url)
         except requests.RequestException as e:
             self.logger.error("Network error updating Airtable: %s", e)
@@ -203,12 +199,12 @@ class AirtableClient:
         """Voegt een nieuwe aanvraag toe aan de Aanvragen tabel."""
         logger = logging.getLogger(__name__)
         api = Api(AIRTABLE_API_KEY)
-        table = api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME_PROCESSED)
+        table = api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME_AANVRAGEN)
 
         lines = markdown_data.split('\n')
         data = {
             'URL': listing_url,
-            'Status': 'New'
+            'Status': 'Nieuw'
         }
 
         # Extract data from markdown
@@ -360,33 +356,111 @@ def extract_data_from_html(html, url):
 
 def check_environment_variables():
     """Controleert of alle benodigde environment variabelen zijn ingesteld."""
-    logger = logging.getLogger(__name__)
-    required_vars = {
-        'SPINWEB_USER': 'Spinweb gebruikersnaam',
-        'SPINWEB_PASS': 'Spinweb wachtwoord',
-        'SPINWEB_LOGIN': 'Spinweb login URL',
-        'SOURCE_URL': 'Bron URL voor vacatures',
-        'PROVIDER_NAME': 'Provider naam',
-        'OPENAI_API_KEY': 'OpenAI API key',
-        'AIRTABLE_API_KEY': 'Airtable API key',
-        'AIRTABLE_BASE_ID': 'Airtable Base ID',
-        'AIRTABLE_TABLE_NAME_PROCESSED': 'Airtable tabel naam voor verwerkte items',
-        'AIRTABLE_TABLE_NAME_LISTINGS': 'Airtable tabel naam voor listings'
-    }
-
-    missing_vars = []
-    for var, description in required_vars.items():
-        if not os.getenv(var):
-            missing_vars.append(f"- {var}: {description}")
-
+    required_vars = [
+        "SUPABASE_URL",
+        "SUPABASE_KEY",
+        "OPENAI_API_KEY",
+        "AIRTABLE_API_KEY",
+        "AIRTABLE_BASE_ID",
+        "AIRTABLE_TABLE_NAME_AANVRAGEN",
+    ]
+    
+    missing_vars = [var for var in required_vars if not os.getenv(var)]
     if missing_vars:
-        logger.error("Missing environment variables:")
-        for var in missing_vars:
-            logger.error("%s", var)
-        logger.error("Make sure these variables are set in your .env file.")
-        sys.exit(1)
+        raise EnvironmentError(
+            f"Missende environment variabelen: {', '.join(missing_vars)}"
+        )
 
-    logger.info("All environment variables are correctly set")
+async def cleanup_closed_listings():
+    """
+    Verwijdert alle listings met status 'Closed' uit de Airtable.
+    
+    Returns:
+        int: Aantal verwijderde listings
+    """
+    logger = logging.getLogger(__name__)
+    logger.info("Start opschonen van gesloten listings")
+    
+    try:
+        # Initialiseer Airtable client
+        api = Api(AIRTABLE_API_KEY)
+        table = api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME_AANVRAGEN)
+        
+        # Haal alle records op met status 'Closed'
+        closed_records = table.all(formula="Status='Closed'")
+        
+        if not closed_records:
+            logger.info("Geen gesloten listings gevonden om op te schonen")
+            return 0
+            
+        # Verwijder de gesloten records
+        record_ids = [record['id'] for record in closed_records]
+        table.batch_delete(record_ids)
+        
+        logger.info(f"Succesvol {len(record_ids)} gesloten listings verwijderd")
+        return len(record_ids)
+        
+    except Exception as e:
+        logger.error(f"Fout bij opschonen van gesloten listings: {str(e)}")
+        raise
+
+def get_lowest_listing_url() -> str:
+    """
+    Haalt de URL op met de laagste waarde uit de Aanvragen tabel.
+    
+    Returns:
+        str: De URL met de laagste waarde, of een default URL als er geen entries zijn
+    """
+    logger = logging.getLogger(__name__)
+    try:
+        api = Api(AIRTABLE_API_KEY)
+        table = api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME_AANVRAGEN)
+        
+        # Haal alle records op en sorteer ze op URL
+        records = table.all(sort=['URL'])
+        
+        if not records:
+            logger.warning("Geen entries gevonden in Aanvragen tabel")
+            return "https://spinweb.nl/vacature/864984"  # Fallback URL
+            
+        # Pak de eerste URL (laagste waarde)
+        lowest_url = records[0]['fields'].get('URL', '')
+        
+        if not lowest_url:
+            logger.warning("Geen URL gevonden in eerste record")
+            return "https://spinweb.nl/vacature/864984"  # Fallback URL
+            
+        logger.info(f"Laagste URL gevonden: {lowest_url}")
+        return lowest_url
+        
+    except Exception as e:
+        logger.error(f"Fout bij ophalen laagste URL: {str(e)}")
+        return "https://spinweb.nl/vacature/864984"  # Fallback URL
+
+def get_existing_urls_from_aanvragen() -> set:
+    """
+    Haalt alle bestaande URLs op uit de Aanvragen tabel.
+    
+    Returns:
+        set: Set van alle URLs in de Aanvragen tabel
+    """
+    logger = logging.getLogger(__name__)
+    try:
+        api = Api(AIRTABLE_API_KEY)
+        table = api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME_AANVRAGEN)
+        
+        # Haal alle records op
+        records = table.all()
+        
+        # Verzamel alle URLs in een set
+        urls = {record['fields'].get('URL', '') for record in records if 'URL' in record['fields']}
+        
+        logger.info(f"Gevonden {len(urls)} bestaande URLs in Aanvragen tabel")
+        return urls
+        
+    except Exception as e:
+        logger.error(f"Fout bij ophalen bestaande URLs uit Aanvragen: {str(e)}")
+        return set()
 
 async def main():
     """
@@ -395,19 +469,24 @@ async def main():
     Deze functie voert de volgende stappen uit:
     1. Setup logging met file rotation
     2. Controleert environment variabelen
-    3. Configureert de crawler
-    4. Voert de crawler uit op de Spinweb website
-    5. Verwerkt de gevonden vacatures
-    
-    Raises:
-        SystemExit: Als er environment variabelen missen
-        Exception: Bij onverwachte fouten tijdens het scrapen
+    3. Verwijdert gesloten listings
+    4. Configureert de crawler
+    5. Voert de crawler uit op de Spinweb website
+    6. Verwerkt de gevonden vacatures
     """
     logger = setup_logging()
     logger.info("Starting vacancy scraper")
-
+    
     check_environment_variables()
-
+    
+    # Voeg cleanup toe als eerste stap
+    try:
+        removed_count = await cleanup_closed_listings()
+        logger.info(f"Opschonen voltooid: {removed_count} gesloten listings verwijderd")
+    except Exception as e:
+        logger.error(f"Fout bij opschonen van listings: {str(e)}")
+        return
+    
     # Initialiseer Airtable client
     airtable = AirtableClient()
     airtable.get_table_schema()
@@ -477,47 +556,45 @@ async def main():
         logger.info("Crawled URL: %s", result.url)
         vacancy_links = set(f"https://{PROVIDER_NAME}" + link for link in re.findall(r'/aanvraag/\d+', result.html))
 
-        existing_listings = airtable.get_existing_listings()
-        new_listings = {link for link in vacancy_links - existing_listings
-                       if int(link.split('/')[-1]) > 863693}
+        existing_aanvragen_urls = get_existing_urls_from_aanvragen()
+        lowest_url = get_lowest_listing_url()
+
+        # Vereenvoudigde filtering zonder existing_listings check
+        new_listings = {link for link in vacancy_links
+                       if link not in existing_aanvragen_urls
+                       and link > lowest_url}
         new_listings = sorted(new_listings)
 
-        if not new_listings:
-            logger.info("No new listings found.")
-        else:
-            logger.info("Found %d new listings to process", len(new_listings))
-            for listing_url in new_listings.copy():
-                result = await crawler.arun(listing_url, config=crawler_run_config)
-                if result.success:
-                    logger.info("Crawled URL: %s", listing_url)
-                    markdown_data = extract_data_from_html(result.html, listing_url)
+        logger.info(f"Gevonden {len(new_listings)} nieuwe vacatures om te verwerken")
+        for listing_url in new_listings.copy():
+            result = await crawler.arun(listing_url, config=crawler_run_config)
+            if result.success:
+                logger.info("Crawled URL: %s", listing_url)
+                markdown_data = extract_data_from_html(result.html, listing_url)
 
-                    try:
-                        # Eerst proberen de aanvraag toe te voegen
-                        airtable.add_to_airtable(markdown_data, listing_url)
-                        # Alleen als dat succesvol was, markeren als verwerkt
-                        airtable.add_processed_listing(listing_url)
-                        logger.info("Succesvol verwerkt en gemarkeerd: %s", listing_url)
-                    except requests.RequestException as e:
-                        logger.error("Netwerk fout bij toevoegen aan Airtable: %s - %s",
-                                   listing_url, str(e))
-                        continue
-                    except ValueError as e:
-                        logger.error("Ongeldige data voor Airtable: %s - %s",
-                                   listing_url, str(e))
-                        continue
-                    except KeyError as e:
-                        logger.error("Ontbrekend verplicht veld: %s - %s",
-                                   listing_url, str(e))
-                        continue
-                    except (TypeError, AttributeError) as e:
-                        logger.error("Data structuur fout: %s - %s",
-                                   listing_url, str(e))
-                        continue
+                try:
+                    # Eerst proberen de aanvraag toe te voegen
+                    airtable.add_to_airtable(markdown_data, listing_url)
+                except requests.RequestException as e:
+                    logger.error("Netwerk fout bij toevoegen aan Airtable: %s - %s",
+                               listing_url, str(e))
+                    continue
+                except ValueError as e:
+                    logger.error("Ongeldige data voor Airtable: %s - %s",
+                               listing_url, str(e))
+                    continue
+                except KeyError as e:
+                    logger.error("Ontbrekend verplicht veld: %s - %s",
+                               listing_url, str(e))
+                    continue
+                except (TypeError, AttributeError) as e:
+                    logger.error("Data structuur fout: %s - %s",
+                               listing_url, str(e))
+                    continue
 
-                    new_listings.remove(listing_url)
-                else:
-                    logger.error("Error crawling %s: %s", listing_url, result.error_message)
+                new_listings.remove(listing_url)
+            else:
+                logger.error("Error crawling %s: %s", listing_url, result.error_message)
     else:
         logger.error("Error crawling source URL: %s", result.error_message)
 
