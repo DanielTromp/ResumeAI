@@ -1,3 +1,23 @@
+"""
+Resume Processing Module
+
+Dit script verwerkt CV's en vacatures door:
+1. Het ophalen van nieuwe vacatures uit Airtable
+2. Het vergelijken van CV's met vacatures via embeddings
+3. Het evalueren van matches met behulp van GPT-4
+4. Het bijwerken van de vacaturestatus in Airtable
+
+Het script maakt gebruik van:
+- OpenAI's API voor embeddings en GPT-4 evaluaties
+- Supabase voor vector similarity search
+- Airtable voor vacature- en CV-beheer
+
+Author: Daniel Tromp
+Version: 1.0.0
+Created: 2024-02-14
+License: MIT
+"""
+
 import os
 import json
 from collections import defaultdict
@@ -14,12 +34,13 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 AIRTABLE_API_KEY = os.getenv("AIRTABLE_API_KEY")
 AIRTABLE_BASE_ID = os.getenv("AIRTABLE_BASE_ID")
-AIRTABLE_TABLE_NAME_PROCESSED = os.getenv("AIRTABLE_TABLE_NAME_PROCESSED")
+AIRTABLE_TABLE_NAME_AANVRAGEN = os.getenv("AIRTABLE_TABLE_NAME_AANVRAGEN")
 AIRTABLE_TABLE_NAME_EXCLUDED = os.getenv("AIRTABLE_TABLE_NAME_EXCLUDED")
+OPENROUTESERVICE_KEY = os.getenv("OPENROUTESERVICE")
 
 # Verbinding maken met services
 api = Api(AIRTABLE_API_KEY)
-vacatures_table = api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME_PROCESSED)
+vacatures_table = api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME_AANVRAGEN)
 excluded_clients_table = api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME_EXCLUDED)
 client = supabase.create_client(SUPABASE_URL, SUPABASE_KEY)
 client_openai = OpenAI(api_key=OPENAI_API_KEY)
@@ -45,14 +66,48 @@ def get_embedding(text: str) -> list[float]:
     return embedding_response.data[0].embedding
 
 def evaluate_candidate(naam: str, cv_text: str, vacature_text: str) -> tuple[dict, dict]:
-    """Evalueert een kandidaat en returnt een JSON-gestructureerd resultaat en token counts."""
+    """Evalueert een kandidaat en returnt een JSON-gestructureerd resultaat en token counts.
+    
+    Args:
+        naam: De naam van de kandidaat
+        cv_text: De tekst van het CV van de kandidaat
+        vacature_text: De tekst van de vacature
+    
+    Returns:
+        Een tuple met een dictionary van de evaluatie en een dictionary van token counts
+    """
     prompt = (
-        "Vergelijk dit CV met de vacature en geef uitsluitend een gestructureerd JSON-resultaat "
-        "terug met de velden: naam, percentage, en onderbouwing.\n\n"
-        "Vacature:\n"
+        "Evalueer de geschiktheid van een kandidaat voor een specifieke vacature op basis van de opgegeven functiebeschrijving en CV.\n\n"
+        "**Functieomschrijving:**\n"
         f"{vacature_text}\n\n"
-        "CV:\n"
-        f"{cv_text}"
+        "**Gewenste kwalificaties en vaardigheden:**\n"
+        "- Vereiste vaardigheden worden uit de functieomschrijving gehaald\n"
+        "- Optionele vaardigheden worden uit de functieomschrijving gehaald\n"
+        "- Ervaring in relevante sector wordt uit de functieomschrijving gehaald\n"
+        "- Vermogen om specifieke taken uit te voeren wordt uit de functieomschrijving gehaald\n"
+        "- Eventuele extra eisen worden uit de functieomschrijving gehaald\n\n"
+        "**Kandidaatgegevens (CV):**\n"
+        f"- Naam: {naam}\n"
+        f"- CV tekst: {cv_text}\n\n"
+        "### **Beoordelingscriteria:**\n"
+        "1. **Functieniveau vergelijking (ZEER BELANGRIJK):** \n"
+        "   - Vergelijk het niveau van de huidige functie met de vacature\n"
+        "   - Een stap terug in functieniveau is NIET wenselijk\n"
+        "   - Geef een negatief advies als de vacature een duidelijke stap terug is\n"
+        "   - Weeg dit zwaar mee in het matchpercentage\n"
+        "2. **Relevantie van werkervaring:** Hoe goed sluit de werkervaring van de kandidaat aan bij de functie? "
+        "Is de ervaring **strategisch, operationeel of hands-on**?\n"
+        "3. **Vaardigheden match:** Heeft de kandidaat de vereiste vaardigheden en hoe sterk zijn ze aanwezig?\n"
+        "4. **Praktische inzetbaarheid:** Is de kandidaat direct inzetbaar of is er een leercurve?\n"
+        "5. **Risico's:** Zijn er risico's door gebrek aan specifieke ervaring, werkstijl of een te groot verschil met de functie?\n\n"
+        "### **Uitvoer:**\n"
+        "- **Matchpercentage (0-100%)** op basis van hoe goed de kandidaat past bij de functie.\n"
+        "  Als de vacature een stap terug is in functieniveau, geef dan maximaal 40% match.\n"
+        "- **Sterke punten** van de kandidaat.\n"
+        "- **Zwakke punten** en aandachtspunten.\n"
+        "- **Eindoordeel** of de kandidaat geschikt is, met argumentatie.\n"
+        "  Begin het eindoordeel met een duidelijke analyse van het functieniveau verschil.\n\n"
+        "Geef je antwoord in JSON formaat met de volgende velden: naam, percentage, sterke_punten, zwakke_punten, eindoordeel"
     )
 
     # Tel input tokens
@@ -94,7 +149,9 @@ def evaluate_candidate(naam: str, cv_text: str, vacature_text: str) -> tuple[dic
         return {
             "naam": naam,
             "percentage": 0,
-            "onderbouwing": "Error: Kon geen valide JSON-response genereren"
+            "sterke_punten": [],
+            "zwakke_punten": [],
+            "eindoordeel": "Error: Kon geen valide JSON-response genereren"
         }, token_counts
 
 def process_vacancy(vacancy_id: str, vacancy_text: str, matches: dict) -> tuple[dict, dict]:

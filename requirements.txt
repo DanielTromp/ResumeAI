@@ -1,7 +1,9 @@
 aiohttp>=3.11.0
 beautifulsoup4>=4.13.0
 Crawl4AI>=0.4.248
+geopy==2.4.1
 openai>=1.0.0
+openrouteservice==2.3.3
 playwright>=1.50.0
 pyairtable>=3.0.0
 pypdf==5.3.0
