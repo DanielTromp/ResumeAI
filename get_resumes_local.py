@@ -9,7 +9,7 @@ Dit script verwerkt CV's en vacatures door:
 
 Het script maakt gebruik van:
 - OpenAI's API voor embeddings en GPT-4 evaluaties
-- Supabase voor vector similarity search
+- LanceDB voor vector similarity search
 - Airtable voor vacature- en CV-beheer
 
 Author: Daniel Tromp
@@ -23,26 +23,24 @@ import json
 from collections import defaultdict
 from dotenv import load_dotenv
 from openai import OpenAI
-import supabase
+import lancedb
 from pyairtable import Api
 import tiktoken
 
 # Omgevingsvariabelen laden
 load_dotenv()
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 AIRTABLE_API_KEY = os.getenv("AIRTABLE_API_KEY")
 AIRTABLE_BASE_ID = os.getenv("AIRTABLE_BASE_ID")
 AIRTABLE_TABLE_NAME_AANVRAGEN = os.getenv("AIRTABLE_TABLE_NAME_AANVRAGEN")
 AIRTABLE_TABLE_NAME_EXCLUDED = os.getenv("AIRTABLE_TABLE_NAME_EXCLUDED")
-OPENROUTESERVICE_KEY = os.getenv("OPENROUTESERVICE")
 
 # Verbinding maken met services
 api = Api(AIRTABLE_API_KEY)
 vacatures_table = api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME_AANVRAGEN)
 excluded_clients_table = api.table(AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME_EXCLUDED)
-client = supabase.create_client(SUPABASE_URL, SUPABASE_KEY)
+db = lancedb.connect("./lancedb")  # Gebruik dezelfde database locatie
+table = db.open_table("cv_chunks")
 client_openai = OpenAI(api_key=OPENAI_API_KEY)
 
 # Token calculator initialiseren
@@ -211,7 +209,6 @@ def process_vacancy(vacancy_id: str, vacancy_text: str, matches: dict) -> tuple[
 def main():
     # Haal uitgesloten klanten op
     excluded_clients = get_excluded_clients()
-    print(f"ℹ️ Geladen uitgesloten klanten: {len(excluded_clients)}")
 
     # Ophalen van vacatures met status "Nieuw"
     vacancies = vacatures_table.all(formula="Status='Nieuw'")
@@ -246,24 +243,19 @@ def main():
 
         print(f"\n🔍 Verwerken van vacature: {vacature_data.get('Functie', 'Onbekend')} ({vacature_id})")
 
-        # Vector search uitvoeren
+        # Vector search uitvoeren met LanceDB
         vacature_embedding = get_embedding(vacature_tekst)
-        query = client.rpc("match_cv_chunks", {
-            "query_embedding": vacature_embedding,
-            "match_threshold": 0.75,
-            "match_count": 20
-        }).execute()
-
-        if not query.data:
+        results = table.search(vacature_embedding, vector_column_name="embedding").limit(20).to_pandas()
+        
+        if results.empty:
             print(f"⚠️ Geen matches gevonden voor vacature {vacature_id}")
-            # Update status naar AI afgewezen als er geen matches zijn
             vacatures_table.update(vacature_id, {"Status": "AI afgewezen"})
             continue
 
         # Resultaten groeperen per kandidaat
         matches = defaultdict(list)
-        for item in query.data:
-            matches[item["naam"]].append(item["cv_chunk"])
+        for _, row in results.iterrows():
+            matches[row["naam"]].append(row["cv_chunk"])
 
         print(f"📝 Gevonden {len(matches)} unieke kandidaten voor evaluatie")
 
