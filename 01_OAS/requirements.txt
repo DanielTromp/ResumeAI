@@ -1,5 +1,6 @@
 beautifulsoup4
 Crawl4AI
+html2text
 openai
 playwright
 pyairtable
