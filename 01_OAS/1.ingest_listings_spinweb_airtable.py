@@ -36,6 +36,7 @@ from playwright.async_api import Page, BrowserContext
 import playwright.async_api
 from pyairtable import Api
 import requests
+import html2text
 
 # Load environment variables
 load_dotenv()
@@ -44,11 +45,18 @@ PASSWORD = os.getenv("SPINWEB_PASS")
 LOGIN_URL = os.getenv("SPINWEB_LOGIN")
 SOURCE_URL = os.getenv("SOURCE_URL")
 PROVIDER_NAME = os.getenv("PROVIDER_NAME", "provider")
-
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 AIRTABLE_API_KEY = os.getenv("AIRTABLE_API_KEY")
 AIRTABLE_BASE_ID = os.getenv("AIRTABLE_BASE_ID")
 AIRTABLE_TABLE_NAME_AANVRAGEN = os.getenv("AIRTABLE_TABLE_NAME_AANVRAGEN")
+
+def convert_html_to_markdown(html_text: str) -> str:
+    """Zet HTML om naar Markdown met behoud van de opmaak."""
+    converter = html2text.HTML2Text()
+    converter.ignore_links = False      # Zorgt dat links worden omgezet
+    converter.ignore_images = False     # Converteer ook afbeeldingen, indien gewenst
+    converter.body_width = 0              # Voorkom automatische lijnbrekingen
+    markdown_text = converter.handle(html_text)
+    return markdown_text.strip()
 
 # Configureer logging
 def setup_logging() -> logging.Logger:
@@ -271,51 +279,6 @@ class AirtableClient:
         except AttributeError as e:
             self.logger.error("Missing required table configuration: %s", e)
 
-def correct_markdown_with_llm(text: str) -> tuple[str, dict]:
-    """Corrigeert de markdown-opmaak met behulp van het OpenAI API."""
-    logger = logging.getLogger(__name__)
-    client = openai.OpenAI(api_key=OPENAI_API_KEY)
-
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content":
-                    "Je taak is om markdown-opmaak te corrigeren."
-                    "Behoud de inhoud exact, verbeter alleen de opmaak."},
-                {"role": "user", "content": text}
-            ],
-            temperature=0.0,
-            max_tokens=4000,
-            timeout=30
-        )
-
-        usage = {
-            'input_tokens': response.usage.prompt_tokens,
-            'output_tokens': response.usage.completion_tokens,
-            'total_tokens': response.usage.total_tokens
-        }
-
-        return response.choices[0].message.content.strip(), usage
-    except openai.RateLimitError as e:
-        logger.error("OpenAI Rate Limit bereikt: %s", e)
-        return text, {}
-    except openai.APITimeoutError as e:
-        logger.error("OpenAI Timeout: %s", e)
-        return text, {}
-    except openai.APIConnectionError as e:
-        logger.error("OpenAI Connectie probleem: %s", e)
-        return text, {}
-    except openai.APIError as e:
-        logger.error("OpenAI API Error: %s", e)
-        return text, {}
-    except (ValueError, TypeError) as e:
-        logger.error("Ongeldige input parameters: %s", e)
-        return text, {}
-    except AttributeError as e:
-        logger.error("Ontbrekende API configuratie: %s", e)
-        return text, {}
-
 def extract_data_from_html(html, url):
     """Extracts structured data from HTML and converts it to Markdown."""
     logger = logging.getLogger(__name__)
@@ -341,16 +304,16 @@ def extract_data_from_html(html, url):
             value = value.replace("onbekend", "").strip()
         markdown_output += f"- **{key}:** {value}\n"
 
-    functieomschrijving_text = functieomschrijving.get_text(separator='\n', strip=True) if functieomschrijving else "Geen omschrijving beschikbaar."
-    verbeterde_functieomschrijving, token_usage = correct_markdown_with_llm(functieomschrijving_text)
+    if functieomschrijving:
+        # Haal de gehele HTML op van de functieomschrijving
+        functieomschrijving_html = str(functieomschrijving)
+    else:
+        functieomschrijving_html = "<p>Geen omschrijving beschikbaar.</p>"
 
-    if token_usage:
-        logger.info("Token gebruik - Input: %d, Output: %d, Totaal: %d",
-                   token_usage['input_tokens'],
-                   token_usage['output_tokens'],
-                   token_usage['total_tokens'])
+    # Converteer de HTML naar Markdown
+    markdown_functieomschrijving = convert_html_to_markdown(functieomschrijving_html)
 
-    markdown_output += "\n## Functieomschrijving\n" + verbeterde_functieomschrijving + "\n\n"
+    markdown_output += "\n## Functieomschrijving\n" + markdown_functieomschrijving + "\n\n"
 
     return markdown_output
 
@@ -359,7 +322,6 @@ def check_environment_variables():
     required_vars = [
         "SUPABASE_URL",
         "SUPABASE_KEY",
-        "OPENAI_API_KEY",
         "AIRTABLE_API_KEY",
         "AIRTABLE_BASE_ID",
         "AIRTABLE_TABLE_NAME_AANVRAGEN",
