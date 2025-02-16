@@ -1,11 +1,18 @@
 ##########################
 # Project specific files #
+##########################
 
 .env
-/venv
-/old
-/resumes
 ResumeAI.code-workspace
+
+############################
+# Project specific folders #
+############################
+
+venv/
+old/
+resumes/
+lancedb/
 
 ######################
 # Default .gitignore #

@@ -1,0 +1,44 @@
+-- Activeer de pgvector-extensie (indien nog niet geactiveerd)
+CREATE EXTENSION IF NOT EXISTS vector;
+
+-- Verwijder de bestaande tabel als deze bestaat
+DROP TABLE IF EXISTS public."01_OAS";
+
+-- Maak de tabel opnieuw aan met de benodigde kolommen
+CREATE TABLE public."01_OAS" (
+    id serial PRIMARY KEY,
+    naam text,
+    cv_chunk text,
+    embedding vector(1536)
+);
+
+-- Verwijder eventuele oude overloads van de functie
+DROP FUNCTION IF EXISTS public.match_01_oas(integer, double precision, vector);
+DROP FUNCTION IF EXISTS public.match_01_oas(vector, double precision, integer);
+
+-- Maak de functie match_01_oas aan met parameters in alfabetische volgorde:
+-- match_count, match_threshold, query_embedding
+CREATE OR REPLACE FUNCTION public.match_01_oas(
+    match_count integer,
+    match_threshold double precision,
+    query_embedding vector
+)
+RETURNS TABLE (
+    id integer,
+    naam text,
+    cv_chunk text,
+    embedding vector,
+    similarity double precision
+)
+AS $$
+  SELECT 
+    id, 
+    naam, 
+    cv_chunk, 
+    embedding,
+    1 - (embedding <=> query_embedding) AS similarity
+  FROM public."01_OAS"
+  WHERE 1 - (embedding <=> query_embedding) >= match_threshold
+  ORDER BY embedding <=> query_embedding
+  LIMIT match_count;
+$$ LANGUAGE sql STABLE;
