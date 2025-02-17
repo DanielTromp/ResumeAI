@@ -105,7 +105,7 @@ def evaluate_candidate(name: str, cv_text: str, vacature_text: str) -> tuple[dic
         "Geef je antwoord in JSON formaat met de volgende velden: name, percentage, sterke_punten, zwakke_punten, eindoordeel"
     )
 
-    # Tel input tokens
+    # Count input tokens
     prompt_tokens = count_tokens(prompt)
     system_tokens = count_tokens(
         "Je bent een ervaren HR-specialist. Geef alleen JSON output terug. "
@@ -129,7 +129,7 @@ def evaluate_candidate(name: str, cv_text: str, vacature_text: str) -> tuple[dic
         temperature=0.1
     )
 
-    # Tel output tokens
+    # Count output tokens
     output_tokens = count_tokens(response.choices[0].message.content)
     
     token_counts = {
@@ -306,3 +306,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# End of file
