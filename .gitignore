@@ -4,6 +4,7 @@
 
 .env
 ResumeAI.code-workspace
+vacancies.csv
 
 ############################
 # Project specific folders #
