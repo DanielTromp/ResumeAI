@@ -1,15 +1,32 @@
+# Core dependencies
 aiohttp>=3.11.0
 beautifulsoup4>=4.13.0
 Crawl4AI>=0.4.248
 geopy==2.4.1
-lancedb==0.19.0
-numpy==2.2.2
+html2text>=2024.2.26
+numpy>=2.2.2
 openai>=1.0.0
 openrouteservice==2.3.3
 playwright>=1.50.0
-pyairtable>=3.0.0
 pypdf==5.3.0
 python-dotenv>=1.0.0
-supabase==2.13.0
-tiktoken>=0.8.0
 requests>=2.31.0
+tiktoken>=0.8.0
+
+# Storage backends
+lancedb==0.19.0
+pyairtable>=3.0.0
+supabase>=2.13.0
+
+# Web scraping and processing
+fake-useragent>=2.0.3
+lxml>=5.3.0
+
+# Development tools
+pillow>=10.4.0  # For image processing if needed
+tqdm>=4.67.1    # For progress bars
+rich>=13.9.4    # For rich console output
+
+# Optional but recommended
+pydantic>=2.10.6  # For data validation
+PyYAML>=6.0.2    # For configuration files
