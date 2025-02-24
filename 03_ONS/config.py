@@ -4,7 +4,6 @@ from dotenv import load_dotenv
 # Load .env file for sensitive data
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-AIRTABLE_API_KEY = os.getenv("AIRTABLE_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
@@ -15,12 +14,6 @@ URL1_LOGIN_URL = "https://spinweb.nl/inloggen/form"
 URL1_SOURCE = "https://spinweb.nl/interim-aanvragen?categories=ICT"
 URL1_PROVIDER_NAME = "spinweb.nl"
 
-# Project specific Airtable configuration
-AIRTABLE_BASE_ID = "app6LNfGRTroZz2zA"
-AIRTABLE_TABLE1 = "tblsbTQhmqndmIFan"
-AIRTABLE_TABLE2 = "tblGRKanBz7PWWjtI"
-#AIRTABLE_TABLE_NAME_AANVRAGEN = AIRTABLE_TABLE1
-#AIRTABLE_TABLE_NAME_EXCLUDED = AIRTABLE_TABLE2
 
 # Project specific vector configuration
 EMBEDDING_MODEL = "text-embedding-ada-002"

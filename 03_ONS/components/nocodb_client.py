@@ -3,6 +3,7 @@ import datetime
 import logging
 import requests
 from config import NOCODB_TOKEN, NOCODB_URL, NOCODB_PROJECT, NOCODB_TABLE
+from datetime import datetime
 
 # Constants voor NocoDB
 NOCODB_API_URL = f"{NOCODB_URL}/api/v1/db/data/v1/{NOCODB_PROJECT}/{NOCODB_TABLE}"
@@ -80,7 +81,7 @@ class NocoDBClient:
     def parse_date(self, value: str) -> str:
         """Zet een datum string om naar het juiste formaat."""
         try:
-            date_obj = datetime.datetime.strptime(value, '%d-%m-%Y')
+            date_obj = datetime.strptime(value, '%d-%m-%Y')
             return date_obj.strftime('%Y-%m-%d')
         except ValueError as e:
             self.logger.error("Fout bij parsen van datum: %s", e)
@@ -133,6 +134,10 @@ class NocoDBClient:
             "URL": listing_url,
             "Status": "Nieuw"
         }
+        
+        # Zet default datum voor Geplaatst
+        current_date = datetime.now().strftime('%Y-%m-%d')
+        
         lines = markdown_data.split('\n')
         for line in lines:
             if line.startswith('- **'):
@@ -145,11 +150,20 @@ class NocoDBClient:
                         data[key] = value.replace("onbekend", "").strip()
                     elif key == 'Tarief':
                         data[key] = value
-                    elif key in ['Geplaatst', 'Sluiting']:
+                    elif key in ['Geplaatst']:
+                        parsed_date = self.parse_date(value)
+                        print(parsed_date)
+                        if parsed_date:  # Alleen overschrijven als er een geldige datum is
+                            data[key] = parsed_date
+                        else:
+                            data[key] = current_date
+                    elif key in ['Sluiting']:
                         data[key] = self.parse_date(value)
+        
         sections = markdown_data.split('## Functieomschrijving')
         if len(sections) > 1:
             data["Functieomschrijving"] = sections[-1].strip()
+        
         return data
 
     def cleanup_closed_listings(self) -> int:
