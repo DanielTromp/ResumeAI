@@ -16,6 +16,7 @@ License: MIT
 
 import csv
 import json
+import re
 from collections import defaultdict
 from openai import OpenAI
 import tiktoken
@@ -26,7 +27,6 @@ from config import OPENAI_API_KEY, EMBEDDING_MODEL, MATCH_THRESHOLD, MATCH_COUNT
 client_openai = OpenAI(api_key=OPENAI_API_KEY)
 enc = tiktoken.encoding_for_model("gpt-4o-mini")
 
-# Constanten
 CSV_VACANCIES = "vacancies.csv"
 
 def load_vacancies_from_csv() -> list:
@@ -66,22 +66,23 @@ def search_candidates(vacancy_embedding: list,
     """Search candidates based on vector similarity."""
     results = collection.search(query=vacancy_embedding)\
         .limit(match_count)\
-        .select(["name", "cv_chunk", "_distance"])\
+        .select(["context", "cv_chunk", "_distance"])\
         .to_list()
-
     return [r for r in results if r["_distance"] <= match_threshold]
 
-def evaluate_candidate(name: str, cv_text: str, vacancy_text: str) -> dict:
-    """Evaluates a candidate and returns a JSON-structured result and token counts.
-    
-    Args:
-        name: The name of the candidate
-        cv_text: The text of the candidate's CV
-        vacature_text: The text of the vacancy
-    
-    Returns:
-        A tuple with a dictionary of the evaluation and a dictionary of token counts
+def extract_candidate_name(context: str) -> str:
     """
+    Extraheert de kandidaatnaam uit de context.
+    Verwacht format: "Chunk X van filename.pdf"
+    """
+    parts = context.split("van")
+    if len(parts) > 1:
+        filename = parts[1].strip()
+        return filename.replace(".pdf", "")
+    return "Onbekend"
+
+def evaluate_candidate(name: str, cv_text: str, vacancy_text: str) -> dict:
+    """Evaluates a candidate and returns a JSON-structured result."""
     prompt = (
         "Evalueer de geschiktheid van een kandidaat voor een specifieke vacature op basis van de opgegeven functiebeschrijving en CV.\n\n"
         "**Functieomschrijving:**\n"
@@ -130,9 +131,8 @@ def evaluate_candidate(name: str, cv_text: str, vacancy_text: str) -> dict:
         response_format={"type": "json_object"},
         temperature=0.1
     )
-
     evaluation = json.loads(response.choices[0].message.content)
-    evaluation['name'] = name  # Voeg name toe aan de evaluatie
+    evaluation['name'] = name  # Voeg de kandidaatnaam toe aan de evaluatie
     return evaluation
 
 def process_vacancy(vacancy_text: str, candidate_matches: dict) -> dict:
@@ -145,8 +145,8 @@ def process_vacancy(vacancy_text: str, candidate_matches: dict) -> dict:
         evaluations.append(evaluation)
 
     sorted_evaluations = sorted(evaluations,
-                                key=lambda x: x.get("percentage",
-                                0), reverse=True)
+                                key=lambda x: x.get("percentage", 0),
+                                reverse=True)
     top_evaluations = sorted_evaluations[:5]
     best_match = top_evaluations[0] if top_evaluations else None
 
@@ -155,8 +155,8 @@ def process_vacancy(vacancy_text: str, candidate_matches: dict) -> dict:
             "Status": "Open" if best_match.get("percentage", 0) >= 60 else "AI afgewezen",
             "Checked_resumes": ", ".join(eval.get("name", "") for eval in top_evaluations),
             "Top_Match": best_match.get("percentage", 0),
-            "Matches": json.dumps({"alle_matches": top_evaluations}, 
-            ensure_ascii=False, indent=2)
+            "Matches": json.dumps({"alle_matches": top_evaluations},
+                                  ensure_ascii=False, indent=2)
         }
     return None
 
@@ -180,9 +180,11 @@ def main():
         vacancy_embedding = get_embedding(vacancy_text)
         results = search_candidates(vacancy_embedding, collection, MATCH_THRESHOLD, MATCH_COUNT)
 
+        # Groepeer resultaten op basis van de kandidaatnaam uit de context
         candidate_matches = defaultdict(list)
         for item in results:
-            candidate_matches[item["name"]].append(item["cv_chunk"])
+            candidate_name = extract_candidate_name(item["context"])
+            candidate_matches[candidate_name].append(item["cv_chunk"])
 
         if candidate_matches:
             result = process_vacancy(vacancy_text, candidate_matches)
@@ -195,5 +197,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-# End of file
