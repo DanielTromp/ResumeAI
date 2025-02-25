@@ -216,8 +216,8 @@ Let op: je output moet een geldig JSON-object zijn, niet alleen de waarden.
                 {"role": "system", "content": "Je bent een AI die sollicitanten evalueert."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.3,
-            max_tokens=800,
+            temperature=0.1,
+            max_tokens=1000,
             top_p=1,
             frequency_penalty=0,
             presence_penalty=0
