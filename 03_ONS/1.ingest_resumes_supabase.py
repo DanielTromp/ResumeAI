@@ -28,20 +28,24 @@ import time
 import tiktoken
 from openai import OpenAI
 from pypdf import PdfReader
-from supabase import create_client
+from supabase import create_client, Client
 
 # Project specific imports
 from config import *
 
-# Connect to Supabase and clear the database every time
+# Connect to Supabase
+url: str = SUPABASE_URL
+key: str = SUPABASE_KEY
+client: Client = create_client(url, key)
+
 try:
-    client = create_client(SUPABASE_URL, SUPABASE_KEY)
-    # Test connection and clear the database
+    print(f"Probeer verbinding te maken met Supabase URL: {url}")
     client.table(RESUME_VECTOR_TABLE).delete().neq('id', 0).execute()
-    print("✅ Supabase connection successful and database cleared!")
+    print("✅ Supabase verbinding en operaties succesvol!")
 except Exception as e:
-    print(f"❌ Error connecting to Supabase: {str(e)}")
-    exit(1)
+    print(f"❌ Error bij Supabase operaties: {str(e)}")
+    print(f"Error type: {type(e)}")
+    raise e
 
 # Set up OpenAI client
 client_openai = OpenAI(api_key=OPENAI_API_KEY)
