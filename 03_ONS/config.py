@@ -14,24 +14,20 @@ URL1_LOGIN_URL = "https://spinweb.nl/inloggen/form"
 URL1_SOURCE = "https://spinweb.nl/interim-aanvragen?categories=ICT"
 URL1_PROVIDER_NAME = "spinweb.nl"
 
-
 # Project specific vector configuration
 EMBEDDING_MODEL = "text-embedding-ada-002"
-#VECTOR_DIMENSIONS = 1536
 
-# 1.ingest_resumes_supabase.py: Ingest configuration
 PDF_FOLDER = "resumes/"
 RESUME_VECTOR_TABLE = "01_OAS"
 
-# 2.ingest_listings_spinweb_airtable.py: Ingest configuration
-NOCODB_URL = "https://nocodb.trmp.dev"
+# Nocodb configuration
+NOCODB_URL = os.getenv("NOCODB_URL")
 NOCODB_TOKEN = os.getenv("NOCODB_TOKEN")
-NOCODB_PROJECT = "po99k9j6j6m7a3o"
-NOCODB_TABLE = "mr5jiy8mnm9rm0x"
+NOCODB_PROJECT = os.getenv("NOCODB_PROJECT")
+NOCODB_TABLE = os.getenv("NOCODB_TABLE")
 
-# 3.match_resumes_supabase.py: Match configuration
 MATCH_THRESHOLD = 0.75
 MATCH_COUNT = 20
 RESUME_RPC_FUNCTION_NAME = "match_01_oas"
-
+EXCLUDED_CLIENTS = os.getenv("EXCLUDED_CLIENTS")
 
