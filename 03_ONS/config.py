@@ -15,6 +15,7 @@ URL1_SOURCE = "https://spinweb.nl/interim-aanvragen?categories=ICT"
 URL1_PROVIDER_NAME = "spinweb.nl"
 
 # Project specific vector configuration
+AI_MODEL = "gpt-4o-mini"
 EMBEDDING_MODEL = "text-embedding-ada-002"
 
 PDF_FOLDER = "resumes/"

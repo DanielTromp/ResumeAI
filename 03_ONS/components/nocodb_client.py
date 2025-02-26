@@ -27,7 +27,7 @@ NOCODB_HEADERS = {
 
 class NocoDBClient:
     """Centrale class voor NocoDB interacties."""
-    
+
     def __init__(self):
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.WARNING)
@@ -38,7 +38,7 @@ class NocoDBClient:
             formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
             console_handler.setFormatter(formatter)
             self.logger.addHandler(console_handler)
-            
+
         self.api_endpoint = NOCODB_API_URL
         self.headers = NOCODB_HEADERS
         try:
@@ -59,19 +59,19 @@ class NocoDBClient:
             response = requests.get(self.api_endpoint, headers=self.headers, params=params)
             response.raise_for_status()
             data = response.json()
-            
+
             # Alleen debug output als het logging niveau DEBUG is
             if self.logger.isEnabledFor(logging.DEBUG):
                 self.logger.debug("API Response structure:")
                 self.logger.debug(json.dumps(data, indent=2))
-                
+
                 if data.get("list"):
                     self.logger.debug("Beschikbare kolommen:")
                     for key in data["list"][0].keys():
                         self.logger.debug(f"- {key}")
                 else:
                     self.logger.warning("Geen records gevonden in tabel")
-                
+
         except Exception as e:
             self.logger.error(f"Debug connectie fout: {str(e)}")
 
@@ -80,19 +80,19 @@ class NocoDBClient:
         """Normaliseert een URL voor consistente vergelijking in de database."""
         # Verwijder witruimte aan begin en eind
         url = url.strip()
-        
+
         # Zet om naar kleine letters
         url = url.lower()
-        
+
         # Verwijder eventuele trailing slashes
         url = url.rstrip('/')
-        
+
         # Verwijder 'http://' of 'https://' prefix
         url = url.replace('http://', '').replace('https://', '')
-        
+
         # Verwijder 'www.' prefix als die aanwezig is
         url = url.replace('www.', '')
-        
+
         # Verwijder eventuele parameters of ankers
         if '?' in url:
             url = url.split('?')[0]
@@ -100,16 +100,16 @@ class NocoDBClient:
             url = url.split('#')[0]
             
         return url
-        
+
     @staticmethod
     def normalize_url_for_crawler(url: str) -> str:
         """Normaliseert een URL voor gebruik in de crawler (behoudt protocol)."""
         # Verwijder witruimte aan begin en eind
         url = url.strip()
-        
+
         # Zet om naar kleine letters
         url = url.lower()
-        
+
         # Verwijder eventuele trailing slashes
         url = url.rstrip('/')
 
