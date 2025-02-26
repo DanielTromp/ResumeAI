@@ -112,11 +112,11 @@ class NocoDBClient:
         
         # Verwijder eventuele trailing slashes
         url = url.rstrip('/')
-        
+
         # Zorg ervoor dat de URL begint met https://
         if not url.startswith('http://') and not url.startswith('https://'):
             url = 'https://' + url
-        
+
         # Verwijder eventuele parameters of ankers
         if '?' in url:
             url = url.split('?')[0]
