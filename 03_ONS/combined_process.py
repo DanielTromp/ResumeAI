@@ -40,13 +40,26 @@ from components.nocodb_client import NocoDBClient
 
 # Configureer logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.WARNING,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler()
     ]
 )
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.WARNING)
+
+# Voeg een aparte handler toe voor voortgangsberichten
+progress_handler = logging.StreamHandler()
+progress_handler.setLevel(logging.INFO)
+progress_formatter = logging.Formatter('%(message)s')
+progress_handler.setFormatter(progress_formatter)
+
+# Maak een aparte logger voor voortgang
+progress_logger = logging.getLogger('progress')
+progress_logger.setLevel(logging.INFO)
+progress_logger.addHandler(progress_handler)
+progress_logger.propagate = False
 
 # Initialize OpenAI client
 client_openai = OpenAI(api_key=OPENAI_API_KEY)
@@ -260,13 +273,13 @@ Let op: je output moet een geldig JSON-object zijn, niet alleen de waarden.
 
 def process_vacancy(vacancy_id: str, vacancy_text: str, matches: dict) -> tuple[dict, dict]:
     """Verwerkt één vacature en evalueert alle kandidaten."""
-    logger.info(f"\n📊 Start evaluatie van {len(matches)} kandidaten voor vacature {vacancy_id}")
+    progress_logger.info(f"\n📊 Start evaluatie van {len(matches)} kandidaten voor vacature {vacancy_id}")
     
     all_evaluations = []
     token_usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "evaluations_count": 0}
     
     for name, chunks in matches.items():
-        logger.info(f"  👤 Evalueren van kandidaat: {name}")
+        progress_logger.info(f"  👤 Evalueren van kandidaat: {name}")
         cv_text = " ".join(chunks)
         evaluation, tokens = evaluate_candidate(name, cv_text, vacancy_text)
         all_evaluations.append(evaluation)
@@ -274,7 +287,7 @@ def process_vacancy(vacancy_id: str, vacancy_text: str, matches: dict) -> tuple[
         token_usage["output_tokens"] += tokens["output_tokens"]
         token_usage["total_tokens"] += tokens["total_tokens"]
         token_usage["evaluations_count"] += 1
-        logger.info(f"    ✓ Match percentage: {evaluation['percentage']}%")
+        progress_logger.info(f"    ✓ Match percentage: {evaluation['percentage']}%")
     
     sorted_evaluations = sorted(all_evaluations, key=lambda x: x["percentage"], reverse=True)
     top_evaluations = sorted_evaluations[:5]
@@ -301,7 +314,7 @@ async def spider_vacatures():
     Spider functie voor het scrapen en verwerken van Spinweb vacatures.
     Haalt vacatures op, doet de CV matching en slaat alles in één keer op.
     """
-    logger.info("🔍 Start gecombineerd vacature ophalen & matching process")
+    progress_logger.info("🔍 Start gecombineerd vacature ophalen & matching process")
     
     # Cleanup gesloten listings
     nocodb.cleanup_closed_listings()
@@ -325,29 +338,29 @@ async def spider_vacatures():
                                       browser_context: playwright.async_api.BrowserContext = None, 
                                       **kwargs):
         """Hook for setting up the page and context after creation."""
-        logger.info("[HOOK] Setting up page & context.")
+        progress_logger.info("[HOOK] Setting up page & context.")
         try:
             await page.goto(URL1_LOGIN_URL, timeout=10000)
         except playwright.async_api.TimeoutError as e:
-            logger.error("Timeout loading login page: %s", e)
+            progress_logger.error("Timeout loading login page: %s", e)
             return page
         except playwright.async_api.Error as e:
-            logger.error("Playwright error loading login page: %s", e)
+            progress_logger.error("Playwright error loading login page: %s", e)
             return page
 
         try:
             if await page.is_visible("input[name='user']"):
-                logger.info("Logging in...")
+                progress_logger.info("Logging in...")
                 await page.fill("input[name='user']", URL1_SPINWEB_USER)
                 await page.fill("input[name='pass']", URL1_SPINWEB_PASS)
                 await page.click("button[type='submit']")
                 await page.wait_for_load_state("networkidle", timeout=30000)
             else:
-                logger.info("Already logged in, skipping login step.")
+                progress_logger.info("Already logged in, skipping login step.")
         except playwright.async_api.TimeoutError as e:
-            logger.error("Timeout during login process: %s", e)
+            progress_logger.error("Timeout during login process: %s", e)
         except playwright.async_api.Error as e:
-            logger.error("Playwright error during login: %s", e)
+            progress_logger.error("Playwright error during login: %s", e)
 
         return page
 
@@ -356,17 +369,17 @@ async def spider_vacatures():
     await crawler.start()
 
     if not URL1_SOURCE:
-        logger.error("Error: No source URL configured in environment variables.")
+        progress_logger.error("Error: No source URL configured in environment variables.")
         return []
 
     result = await crawler.arun(URL1_SOURCE, config=crawler_run_config)
     
     if not result.success:
-        logger.error("Error crawling source URL: %s", result.error_message)
+        progress_logger.error("Error crawling source URL: %s", result.error_message)
         await crawler.close()
         return
     
-    logger.info("Crawled URL: %s", result.url)
+    progress_logger.info("Crawled URL: %s", result.url)
     soup = BeautifulSoup(result.html, 'html.parser')
     
     # Zoek alle vacature links
@@ -380,7 +393,7 @@ async def spider_vacatures():
                 full_url = f"https://{full_url}"
             vacancy_links.add(full_url)
     
-    logger.info(f"Found {len(vacancy_links)} vacancy links")
+    progress_logger.info(f"Found {len(vacancy_links)} vacancy links")
     
     # URL normalisatie voor database en crawler
     # Voor database: zonder protocol (spinweb.nl/aanvraag/123)
@@ -412,34 +425,34 @@ async def spider_vacatures():
             # Fallback: als de URL niet in de mapping staat, voeg het protocol toe
             crawler_url = "https://" + db_url
             new_listings_crawler.append(crawler_url)
-            logger.warning(f"URL {db_url} niet gevonden in mapping, fallback gebruikt: {crawler_url}")
+            progress_logger.warning(f"URL {db_url} niet gevonden in mapping, fallback gebruikt: {crawler_url}")
 
-    logger.info(f"Found {len(new_listings_db)} new vacancies to process")
+    progress_logger.info(f"Found {len(new_listings_db)} new vacancies to process")
     
     # Verwerk elke nieuwe vacature: ophalen, matchen, en dan pas opslaan
     excluded_clients = EXCLUDED_CLIENTS
-    logger.info(f"ℹ️ Uitgesloten klanten geladen: {len(excluded_clients)}")
+    progress_logger.info(f"ℹ️ Uitgesloten klanten geladen: {len(excluded_clients)}")
     total_token_usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "total_evaluations": 0}
     
     for i, db_url in enumerate(new_listings_db):
         crawler_url = new_listings_crawler[i]
-        logger.info(f"\n=== Verwerken vacature {i+1}/{len(new_listings_db)}: {db_url} ===")
+        progress_logger.info(f"\n=== Verwerken vacature {i+1}/{len(new_listings_db)} ===")
         
         # Stap 1: Vacature details ophalen
         try:
             result = await crawler.arun(crawler_url, config=crawler_run_config)
             if not result.success:
-                logger.error(f"Error crawling {crawler_url}: {result.error_message}")
+                progress_logger.error(f"Error crawling {crawler_url}: {result.error_message}")
                 continue
                 
-            logger.info(f"Succesvol gecrawled: {crawler_url}")
+            progress_logger.info(f"Succesvol gecrawled: {crawler_url}")
             markdown_data = extract_data_from_html(result.html, db_url)
             vacancy_data = nocodb._parse_markdown_data(markdown_data, db_url)
             
             # Check of de klant op de uitsluitlijst staat
             client_name = vacancy_data.get("Klant", "").strip()
             if client_name in excluded_clients:
-                logger.info(f"⏭️ Klant '{client_name}' staat op de uitsluitlijst; markeer als AI afgewezen.")
+                progress_logger.info(f"⏭️ Klant '{client_name}' staat op de uitsluitlijst; markeer als AI afgewezen.")
                 vacancy_data["Status"] = "AI afgewezen"
                 vacancy_data["Checked_resumes"] = ""
                 vacancy_data["Top_Match"] = 0
@@ -450,13 +463,13 @@ async def spider_vacatures():
             # Stap 2: CV matching uitvoeren
             vacancy_text = vacancy_data.get("Functieomschrijving", "")
             if not vacancy_text:
-                logger.warning(f"⚠️ Geen functiebeschrijving gevonden voor {db_url}, overslaan.")
+                progress_logger.warning(f"⚠️ Geen functiebeschrijving gevonden voor {db_url}, overslaan.")
                 vacancy_data["Status"] = "Nieuw - Geen beschrijving"
                 nocodb.update_record(vacancy_data, db_url)
                 continue
             
             # Genereer embedding en zoek matches
-            logger.info(f"Genereren embedding en zoeken naar CV matches...")
+            progress_logger.info(f"Genereren embedding en zoeken naar CV matches...")
             vacancy_embedding = get_embedding(vacancy_text)
             try:
                 query = supabase_client.rpc(
@@ -469,7 +482,7 @@ async def spider_vacatures():
                 ).execute()
                 
                 if not query.data:
-                    logger.warning(f"⚠️ Geen CV matches gevonden")
+                    progress_logger.warning(f"⚠️ Geen CV matches gevonden")
                     vacancy_data["Status"] = "AI afgewezen"
                     vacancy_data["Checked_resumes"] = ""
                     vacancy_data["Top_Match"] = 0
@@ -482,7 +495,7 @@ async def spider_vacatures():
                 for item in query.data:
                     matches[item["name"]].append(item["cv_chunk"])
                 
-                logger.info(f"📝 {len(matches)} kandidaten gevonden voor evaluatie")
+                progress_logger.info(f"📝 {len(matches)} kandidaten gevonden voor evaluatie")
                 match_results, vacancy_tokens = process_vacancy(0, vacancy_text, matches)  # 0 is dummy ID
                 
                 total_token_usage["input_tokens"] += vacancy_tokens["input_tokens"]
@@ -493,44 +506,41 @@ async def spider_vacatures():
                 if match_results:
                     # Update de vacature data met match resultaten
                     vacancy_data.update(match_results)
-                    logger.info(f"Match resultaten toegevoegd aan vacature data")
+                    progress_logger.info(f"Match resultaten toegevoegd aan vacature data")
                 else:
-                    logger.warning(f"⚠️ Geen match resultaten gegenereerd")
+                    progress_logger.warning(f"⚠️ Geen match resultaten gegenereerd")
                     vacancy_data["Status"] = "AI afgewezen"
                     vacancy_data["Checked_resumes"] = ""
                     vacancy_data["Top_Match"] = 0
                     vacancy_data["Match Toelichting"] = "Geen resultaten gegenereerd"
             
             except Exception as e:
-                logger.error(f"⚠️ Fout bij CV matching: {str(e)}", exc_info=True)
+                progress_logger.error(f"⚠️ Fout bij CV matching: {str(e)}", exc_info=True)
                 vacancy_data["Status"] = "Error"
                 vacancy_data["Checked_resumes"] = ""
                 vacancy_data["Top_Match"] = 0
                 vacancy_data["Match Toelichting"] = f"Fout tijdens matching: {str(e)}"
             
             # Stap 3: Alle data in één keer opslaan
-            logger.info(f"Opslaan van complete vacature data in NocoDB...")
+            progress_logger.info(f"Opslaan van complete vacature data in NocoDB...")
             success = nocodb.update_record(vacancy_data, db_url)
             if success:
-                logger.info(f"✅ Vacature {db_url} succesvol opgeslagen")
+                progress_logger.info(f"✅ Vacature {db_url} succesvol opgeslagen")
             else:
-                logger.error(f"❌ Fout bij opslaan vacature {db_url}")
+                progress_logger.error(f"❌ Fout bij opslaan vacature {db_url}")
                 
         except Exception as e:
-            logger.error(f"⚠️ Onverwachte fout bij verwerken vacature {db_url}: {str(e)}", exc_info=True)
+            progress_logger.error(f"⚠️ Onverwachte fout bij verwerken vacature {db_url}: {str(e)}", exc_info=True)
 
     await crawler.close()
     
     # Eindrapport
-    logger.info("\n🚀 Alle vacatures verwerkt!")
-    logger.info("\n📈 Eindrapport token gebruik:")
-    logger.info(f"Totale input tokens: {total_token_usage['input_tokens']}")
-    logger.info(f"Totale output tokens: {total_token_usage['output_tokens']}")
-    logger.info(f"Totaal aantal tokens: {total_token_usage['total_tokens']}")
-    logger.info(f"Totaal aantal evaluaties: {total_token_usage['total_evaluations']}")
+    progress_logger.info("\n🚀 Alle vacatures verwerkt!")
+    progress_logger.info("\n📈 Eindrapport token gebruik:")
+    progress_logger.info(f"Totaal aantal evaluaties: {total_token_usage['total_evaluations']}")
     if total_token_usage['total_evaluations'] > 0:
         avg = total_token_usage['total_tokens'] / total_token_usage['total_evaluations']
-        logger.info(f"Gemiddeld tokens per evaluatie: {avg:.2f}")
+        progress_logger.info(f"Gemiddeld tokens per evaluatie: {avg:.2f}")
 
 async def main():
     """Main function voor het volledige proces."""
@@ -539,12 +549,12 @@ async def main():
         check_environment_variables()
         
         # Voer het gecombineerde proces uit in één stap
-        logger.info("🚀 Start gecombineerd vacature & CV match proces")
+        progress_logger.info("🚀 Start gecombineerd vacature & CV match proces")
         await spider_vacatures()
         
-        logger.info("✅ Volledig proces succesvol afgerond!")
+        progress_logger.info("✅ Volledig proces succesvol afgerond!")
     except Exception as e:
-        logger.error(f"❌ Fout in het gecombineerde proces: {str(e)}", exc_info=True)
+        progress_logger.error(f"❌ Fout in het gecombineerde proces: {str(e)}", exc_info=True)
 
 if __name__ == "__main__":
     asyncio.run(main()) 

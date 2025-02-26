@@ -30,11 +30,11 @@ class NocoDBClient:
     
     def __init__(self):
         self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(logging.DEBUG)
+        self.logger.setLevel(logging.WARNING)
         # Add console handler if not already present
         if not self.logger.handlers:
             console_handler = logging.StreamHandler()
-            console_handler.setLevel(logging.DEBUG)
+            console_handler.setLevel(logging.WARNING)
             formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
             console_handler.setFormatter(formatter)
             self.logger.addHandler(console_handler)
@@ -45,7 +45,6 @@ class NocoDBClient:
             response = requests.get(self.api_endpoint, headers=self.headers)
             response.raise_for_status()
             self.logger.info("✅ NocoDB connection successful")
-            self.debug_connection()
         except Exception as e:
             self.logger.error(f"❌ NocoDB connection failed: {e}")
             self.logger.error(f"API URL: {self.api_endpoint}")
@@ -61,15 +60,17 @@ class NocoDBClient:
             response.raise_for_status()
             data = response.json()
             
-            self.logger.debug("API Response structure:")
-            self.logger.debug(json.dumps(data, indent=2))
-            
-            if data.get("list"):
-                self.logger.debug("Beschikbare kolommen:")
-                for key in data["list"][0].keys():
-                    self.logger.debug(f"- {key}")
-            else:
-                self.logger.warning("Geen records gevonden in tabel")
+            # Alleen debug output als het logging niveau DEBUG is
+            if self.logger.isEnabledFor(logging.DEBUG):
+                self.logger.debug("API Response structure:")
+                self.logger.debug(json.dumps(data, indent=2))
+                
+                if data.get("list"):
+                    self.logger.debug("Beschikbare kolommen:")
+                    for key in data["list"][0].keys():
+                        self.logger.debug(f"- {key}")
+                else:
+                    self.logger.warning("Geen records gevonden in tabel")
                 
         except Exception as e:
             self.logger.error(f"Debug connectie fout: {str(e)}")
