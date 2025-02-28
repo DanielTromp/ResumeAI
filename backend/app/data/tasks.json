@@ -1,0 +1,57 @@
+[
+  {
+    "id": "1",
+    "title": "Fix PDF download button",
+    "description": "The download button downloads a damaged file that shows an error message in Chrome saying \"File wasn't available on site\"",
+    "type": "bug",
+    "priority": "high",
+    "status": "in_progress",
+    "due_date": null,
+    "created_at": "2025-02-28T01:00:00",
+    "updated_at": "2025-02-28T01:32:56.036200"
+  },
+  {
+    "id": "2",
+    "title": "Fix PDF view in iframe",
+    "description": "The view button in ResumesList.js opens an iframe with a 404 error",
+    "type": "bug",
+    "priority": "high",
+    "status": "in_progress",
+    "due_date": null,
+    "created_at": "2025-02-28T01:10:00",
+    "updated_at": "2025-02-28T01:29:27.468632"
+  },
+  {
+    "id": "3",
+    "title": "Add Dark Mode support for all components",
+    "description": "Ensure all components properly support dark mode and respond to theme changes",
+    "type": "improvement",
+    "priority": "medium",
+    "status": "done",
+    "due_date": null,
+    "created_at": "2025-02-28T01:15:00",
+    "updated_at": "2025-02-28T01:30:10.020833"
+  },
+  {
+    "id": "4",
+    "title": "Add batch operations for resume selection",
+    "description": "Implement batch select/deselect functionality for multiple resumes at once",
+    "type": "feature",
+    "priority": "medium",
+    "status": "todo",
+    "due_date": null,
+    "created_at": "2025-02-28T01:20:00",
+    "updated_at": "2025-02-28T01:20:00"
+  },
+  {
+    "id": "5",
+    "title": "Add text extraction from PDFs",
+    "description": "Implement text extraction from uploaded PDF resumes to improve matching",
+    "type": "feature",
+    "priority": "high",
+    "status": "todo",
+    "due_date": null,
+    "created_at": "2025-02-28T01:25:00",
+    "updated_at": "2025-02-28T01:25:00"
+  }
+]

@@ -7,7 +7,9 @@ import Dashboard from './pages/Dashboard';
 import VacanciesList from './pages/VacanciesList';
 import VacancyDetail from './pages/VacancyDetail';
 import ResumesList from './pages/ResumesList';
+import ProcessRunner from './pages/ProcessRunner';
 import Settings from './pages/Settings';
+import TaskBoard from './pages/TaskBoard';
 import NotFound from './pages/NotFound';
 
 // Create theme context
@@ -84,6 +86,8 @@ function App() {
             <Route path="/vacancies" element={<VacanciesList />} />
             <Route path="/vacancies/:id" element={<VacancyDetail />} />
             <Route path="/resumes" element={<ResumesList />} />
+            <Route path="/process" element={<ProcessRunner />} />
+            <Route path="/tasks" element={<TaskBoard />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="*" element={<NotFound />} />
           </Routes>

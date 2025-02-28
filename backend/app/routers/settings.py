@@ -35,6 +35,7 @@ class Settings(BaseModel):
     ai_model: Optional[str] = None
     match_threshold: Optional[float] = None
     match_count: Optional[int] = None
+    resume_prompt_template: Optional[str] = None
 
 class SettingsUpdate(BaseModel):
     """Model for updating application settings"""
@@ -51,6 +52,7 @@ class SettingsUpdate(BaseModel):
     ai_model: Optional[str] = None
     match_threshold: Optional[float] = None
     match_count: Optional[int] = None
+    resume_prompt_template: Optional[str] = None
 
 @router.get("/", response_model=Settings)
 async def get_settings():
@@ -62,6 +64,9 @@ async def get_settings():
     try:
         # Load environment variables
         load_dotenv()
+        
+        # Import PROMPT_TEMPLATE
+        from app.config import DEFAULT_PROMPT_TEMPLATE
         
         # Create settings object with redacted sensitive values
         settings = Settings(
@@ -77,7 +82,8 @@ async def get_settings():
             excluded_clients=os.getenv("EXCLUDED_CLIENTS"),
             ai_model=os.getenv("AI_MODEL", "gpt-4o-mini"),
             match_threshold=float(os.getenv("MATCH_THRESHOLD", "0.75")),
-            match_count=int(os.getenv("MATCH_COUNT", "20"))
+            match_count=int(os.getenv("MATCH_COUNT", "20")),
+            resume_prompt_template=os.getenv("RESUME_PROMPT_TEMPLATE", DEFAULT_PROMPT_TEMPLATE)
         )
         
         return settings
@@ -123,7 +129,8 @@ async def update_settings(settings: SettingsUpdate):
             "excluded_clients": "EXCLUDED_CLIENTS",
             "ai_model": "AI_MODEL",
             "match_threshold": "MATCH_THRESHOLD",
-            "match_count": "MATCH_COUNT"
+            "match_count": "MATCH_COUNT",
+            "resume_prompt_template": "RESUME_PROMPT_TEMPLATE"
         }
         
         # Update the environment variables
