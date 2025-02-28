@@ -15,6 +15,8 @@ import DashboardIcon from '@mui/icons-material/Dashboard';
 import WorkIcon from '@mui/icons-material/Work';
 import PersonIcon from '@mui/icons-material/Person';
 import SettingsIcon from '@mui/icons-material/Settings';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import AssignmentIcon from '@mui/icons-material/Assignment';
 import Brightness4Icon from '@mui/icons-material/Brightness4';
 import Brightness7Icon from '@mui/icons-material/Brightness7';
 import { ColorModeContext } from '../App';
@@ -29,6 +31,8 @@ const NavBar = () => {
     { label: 'Dashboard', path: '/', icon: <DashboardIcon fontSize="small" /> },
     { label: 'Vacancies', path: '/vacancies', icon: <WorkIcon fontSize="small" /> },
     { label: 'Resumes', path: '/resumes', icon: <PersonIcon fontSize="small" /> },
+    { label: 'Process', path: '/process', icon: <PlayArrowIcon fontSize="small" /> },
+    { label: 'Tasks', path: '/tasks', icon: <AssignmentIcon fontSize="small" /> },
     { label: 'Settings', path: '/settings', icon: <SettingsIcon fontSize="small" /> },
   ];
 

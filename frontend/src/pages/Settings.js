@@ -39,6 +39,7 @@ const Settings = () => {
     ai_model: '',
     match_threshold: '',
     match_count: '',
+    resume_prompt_template: '',
   });
   
   const [loading, setLoading] = useState(true);
@@ -311,6 +312,28 @@ const Settings = () => {
                   value={settings.excluded_clients}
                   onChange={handleInputChange}
                   helperText="Comma-separated list of clients to exclude"
+                />
+              </Grid>
+              
+              {/* Prompt Template */}
+              <Grid item xs={12}>
+                <Typography variant="h6" gutterBottom sx={{ mt: 2 }}>
+                  Resume Matching Prompt
+                </Typography>
+                <Divider sx={{ mb: 2 }} />
+              </Grid>
+              
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="Resume Prompt Template"
+                  name="resume_prompt_template"
+                  value={settings.resume_prompt_template}
+                  onChange={handleInputChange}
+                  multiline
+                  rows={20}
+                  variant="outlined"
+                  helperText="The prompt template used for resume matching. Use {name}, {vacancy_text}, and {cv_text} as placeholders."
                 />
               </Grid>
 
