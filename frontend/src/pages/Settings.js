@@ -20,6 +20,7 @@ import Brightness4Icon from '@mui/icons-material/Brightness4';
 import Brightness7Icon from '@mui/icons-material/Brightness7';
 import axios from 'axios';
 import { ColorModeContext } from '../App';
+import DatabaseSelectorMUI from '../components/DatabaseSelectorMUI';
 
 const Settings = () => {
   const theme = useTheme();
@@ -130,6 +131,11 @@ const Settings = () => {
                   />
                   <Brightness7Icon sx={{ ml: 1, color: theme.palette.mode === 'light' ? 'inherit' : 'text.secondary' }} />
                 </Box>
+              </Grid>
+              
+              {/* Database Provider */}
+              <Grid item xs={12}>
+                <DatabaseSelectorMUI />
               </Grid>
               
               {/* API Configuration */}

@@ -4,8 +4,22 @@ from dotenv import load_dotenv
 # Load .env file for sensitive data
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+# Database selection
+# Values: "postgres" or "supabase"
+DATABASE_PROVIDER = os.getenv("DATABASE_PROVIDER", "postgres")
+
+# Supabase configuration
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+SUPABASE_RESUME_TABLE = os.getenv("SUPABASE_RESUME_TABLE", "01_OAS")
+
+# PostgreSQL configuration
+PG_HOST = os.getenv("PG_HOST", "localhost")
+PG_PORT = os.getenv("PG_PORT", "5432")
+PG_USER = os.getenv("PG_USER", "postgres")
+PG_PASSWORD = os.getenv("PG_PASSWORD", "postgres")
+PG_DATABASE = os.getenv("PG_DATABASE", "resumeai")
 
 # Default prompt template
 DEFAULT_PROMPT_TEMPLATE = """
@@ -84,8 +98,8 @@ URL1_PROVIDER_NAME = "spinweb.nl"
 AI_MODEL = "gpt-4o-mini"
 EMBEDDING_MODEL = "text-embedding-ada-002"
 
-PDF_FOLDER = "resumes/"
-RESUME_VECTOR_TABLE = "01_OAS"
+PDF_FOLDER = "app/resumes/"
+POSTGRES_RESUME_TABLE = "resumes"  # PostgreSQL table name
 
 # Nocodb configuration
 NOCODB_URL = os.getenv("NOCODB_URL")
@@ -93,8 +107,15 @@ NOCODB_TOKEN = os.getenv("NOCODB_TOKEN")
 NOCODB_PROJECT = os.getenv("NOCODB_PROJECT")
 NOCODB_TABLE = os.getenv("NOCODB_TABLE")
 
+# Matching configuration
 MATCH_THRESHOLD = 0.75
 MATCH_COUNT = 20
-RESUME_RPC_FUNCTION_NAME = "match_01_oas"
-EXCLUDED_CLIENTS = os.getenv("EXCLUDED_CLIENTS")
+POSTGRES_MATCH_FUNCTION = "match_resumes"  # PostgreSQL function name
+SUPABASE_MATCH_FUNCTION = "match_01_oas"   # Supabase RPC function name
+
+# Get the appropriate function name based on provider
+RESUME_RPC_FUNCTION_NAME = SUPABASE_MATCH_FUNCTION if DATABASE_PROVIDER == "supabase" else POSTGRES_MATCH_FUNCTION
+
+# Client exclusion list
+EXCLUDED_CLIENTS = os.getenv("EXCLUDED_CLIENTS", "").split(",") if os.getenv("EXCLUDED_CLIENTS") else []
 

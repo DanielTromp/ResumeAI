@@ -1,0 +1,27 @@
+FROM node:18-alpine
+
+WORKDIR /app
+
+# Copy package.json and package-lock.json
+COPY package*.json ./
+
+# Update the proxy setting to backend container
+# This is the Docker service name that will be resolved in the Docker network
+RUN sed -i 's/"proxy": "http:\/\/localhost:8000"/"proxy": "http:\/\/backend:8008"/' package.json
+
+# Install dependencies
+RUN npm install
+
+# Code will be mounted as a volume
+VOLUME ["/app"]
+
+# Make sure we bind to 0.0.0.0 so the server is accessible outside the container
+ENV HOST=0.0.0.0
+ENV PORT=3000
+ENV WDS_SOCKET_PORT=0
+ENV CHOKIDAR_USEPOLLING=true
+
+EXPOSE 3000
+
+# Start app in development mode with hot reloading
+CMD ["npm", "start"]
