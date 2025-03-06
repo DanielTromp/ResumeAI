@@ -27,8 +27,9 @@ from collections import defaultdict
 
 # Third-party imports
 import html2text
-import supabase
 import tiktoken
+import psycopg2
+import psycopg2.extras
 from openai import OpenAI
 import playwright.async_api
 from bs4 import BeautifulSoup
@@ -36,8 +37,8 @@ from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode
 
 # Project specific imports
 from app.config import AI_MODEL, EMBEDDING_MODEL, OPENAI_API_KEY
-from app.config import SUPABASE_URL, SUPABASE_KEY
 from app.config import NOCODB_TOKEN, NOCODB_PROJECT, NOCODB_TABLE
+from app.config import PG_HOST, PG_PORT, PG_USER, PG_PASSWORD, PG_DATABASE
 from app.config import URL1_SPINWEB_USER, URL1_SPINWEB_PASS
 from app.config import URL1_PROVIDER_NAME, URL1_LOGIN_URL, URL1_SOURCE
 from app.config import EXCLUDED_CLIENTS, MATCH_THRESHOLD, MATCH_COUNT
@@ -54,13 +55,18 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.WARNING)
+logger.setLevel(logging.INFO)  # Changed to INFO to see more details
 
 # Voeg een aparte handler toe voor voortgangsberichten
 progress_handler = logging.StreamHandler()
 progress_handler.setLevel(logging.INFO)
 progress_formatter = logging.Formatter('%(message)s')
 progress_handler.setFormatter(progress_formatter)
+
+# Filter out FastAPI access logs
+for name in logging.root.manager.loggerDict:
+    if name.startswith('uvicorn.') or name.startswith('fastapi.'):
+        logging.getLogger(name).setLevel(logging.WARNING)
 
 # Maak een aparte logger voor voortgang
 progress_logger = logging.getLogger('progress')
@@ -74,8 +80,8 @@ client_openai = OpenAI(api_key=OPENAI_API_KEY)
 # Initialize token calculator
 enc = tiktoken.encoding_for_model(AI_MODEL)
 
-# Initialize Supabase client
-supabase_client = supabase.create_client(SUPABASE_URL, SUPABASE_KEY)
+# Import database service
+from app.services.database_service import db_service
 
 # Initialize NocoDB client
 nocodb = NocoDBClient()
@@ -146,8 +152,11 @@ def check_environment_variables():
         'URL1_PROVIDER_NAME': URL1_PROVIDER_NAME,
         'URL1_SOURCE': URL1_SOURCE,
         'OPENAI_API_KEY': OPENAI_API_KEY,
-        'SUPABASE_URL': SUPABASE_URL,
-        'SUPABASE_KEY': SUPABASE_KEY
+        'PG_HOST': PG_HOST,
+        'PG_PORT': PG_PORT,
+        'PG_USER': PG_USER,
+        'PG_PASSWORD': PG_PASSWORD,
+        'PG_DATABASE': PG_DATABASE
     }
 
     missing_vars = [name for name, value in required_vars.items()
@@ -390,6 +399,10 @@ async def spider_vacatures():
 
     # Verwerk elke nieuwe vacature: ophalen, matchen, en dan pas opslaan
     excluded_clients = EXCLUDED_CLIENTS
+    if isinstance(excluded_clients, str):
+        excluded_clients = [client.strip() for client in excluded_clients.split(',') if client.strip()]
+    elif not isinstance(excluded_clients, list):
+        excluded_clients = []
     progress_logger.info(f"ℹ️ Uitgesloten klanten geladen: {len(excluded_clients)}")
     total_token_usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "total_evaluations": 0}
 
@@ -434,17 +447,22 @@ async def spider_vacatures():
             # Genereer embedding en zoek matches
             progress_logger.info(f"Genereren embedding en zoeken naar CV matches...")
             vacancy_embedding = get_embedding(vacancy_text)
+            
+            # Debug info about the embedding
+            progress_logger.info(f"Embedding generated: length={len(vacancy_embedding)}")
+            progress_logger.info(f"Using database provider: {db_service.provider}")
+            
             try:
-                query = supabase_client.rpc(
-                    RESUME_RPC_FUNCTION_NAME,
-                    {
-                        "query_embedding": vacancy_embedding,
-                        "match_threshold": MATCH_THRESHOLD,
-                        "match_count": MATCH_COUNT
-                    }
-                ).execute()
+                # Get matches using the database service
+                query_data = db_service.get_vector_matches(
+                    embedding=vacancy_embedding,
+                    threshold=MATCH_THRESHOLD,
+                    count=MATCH_COUNT
+                )
+                
+                progress_logger.info(f"Query returned {len(query_data) if query_data else 0} results")
 
-                if not query.data:
+                if not query_data:
                     progress_logger.warning(f"⚠️ Geen CV matches gevonden")
                     vacancy_data["Status"] = "AI afgewezen"
                     vacancy_data["Checked_resumes"] = ""
@@ -455,7 +473,7 @@ async def spider_vacatures():
 
                 # Verwerk matches
                 matches = defaultdict(list)
-                for item in query.data:
+                for item in query_data:
                     matches[item["name"]].append(item["cv_chunk"])
 
                 progress_logger.info(f"📝 {len(matches)} kandidaten gevonden voor evaluatie")
@@ -477,12 +495,12 @@ async def spider_vacatures():
                     vacancy_data["Top_Match"] = 0
                     vacancy_data["Match Toelichting"] = "Geen resultaten gegenereerd"
 
-            except Exception as e:
+            except (psycopg2.Error, Exception) as e:
                 progress_logger.error(f"⚠️ Fout bij CV matching: {str(e)}", exc_info=True)
-                vacancy_data["Status"] = "Error"
+                vacancy_data["Status"] = "Nieuw"  # Changed from Error to Nieuw which is a valid status
                 vacancy_data["Checked_resumes"] = ""
                 vacancy_data["Top_Match"] = 0
-                vacancy_data["Match Toelichting"] = f"Fout tijdens matching: {str(e)}"
+                vacancy_data["Match Toelichting"] = f"Fout tijdens matching: {str(e)[:100]}"
 
             # Stap 3: Alle data in één keer opslaan
             progress_logger.info(f"Opslaan van complete vacature data in NocoDB...")
@@ -505,11 +523,35 @@ async def spider_vacatures():
         avg = total_token_usage['total_tokens'] / total_token_usage['total_evaluations']
         progress_logger.info(f"Gemiddeld tokens per evaluatie: {avg:.2f}")
 
+# Removed test_database_with_dummy_data function since we now use the db_init module
+
 async def main():
     """Main function voor het volledige proces."""
     try:
         # Check environment variables
         check_environment_variables()
+        
+        # Test PostgreSQL connection and set up test data
+        try:
+            # Import database functions
+            from app.db_init import get_connection, initialize_database, add_test_data
+            
+            # Test connection
+            conn = get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1")
+            cursor.close()
+            conn.close()
+            progress_logger.info("✅ PostgreSQL connection successful")
+            
+            # Initialize database and insert test data if needed
+            initialize_database()
+            add_test_data()
+        except Exception as e:
+            progress_logger.error(f"❌ PostgreSQL connection failed: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return
 
         # Voer het gecombineerde proces uit in één stap
         progress_logger.info("🚀 Start gecombineerd vacature & CV match proces")

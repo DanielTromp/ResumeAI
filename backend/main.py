@@ -29,6 +29,17 @@ from app.database.base import get_db, init_db
 async def lifespan(app: FastAPI):
     # Initialize database on startup
     await init_db()
+    
+    # Also directly initialize the PostgreSQL database with pgvector
+    try:
+        from app.db_init import initialize_database, get_connection
+        initialize_database()
+        print("✅ PostgreSQL with pgvector initialized successfully")
+    except Exception as e:
+        print(f"⚠️ PostgreSQL initialization error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+    
     yield
     # Clean up resources on shutdown
     pass
@@ -68,4 +79,4 @@ async def root():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8008, reload=True)

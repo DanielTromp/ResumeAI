@@ -1,0 +1,89 @@
+version: '3'
+
+services:
+  db:
+    image: ankane/pgvector:latest
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=resumeai
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init:/docker-entrypoint-initdb.d
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    ports:
+      - "8008:8008"
+    volumes:
+      - ./backend:/app
+      - backend_data:/app/app/data
+      - resume_storage:/app/app/resumes
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/resumeai
+      - PG_HOST=db
+      - PG_PORT=5432
+      - PG_USER=postgres
+      - PG_PASSWORD=postgres
+      - PG_DATABASE=resumeai
+    restart: unless-stopped
+    command: uvicorn main:app --host 0.0.0.0 --port 8008 --reload
+    depends_on:
+      db:
+        condition: service_healthy
+
+# Frontend disabled as requested - running manually
+#  frontend:
+#    build:
+#      context: ./frontend
+#      dockerfile: Dockerfile.dev
+#    ports:
+#      - "3000:3000"
+#    volumes:
+#      - ./frontend:/app
+#      - /app/node_modules
+#    environment:
+#      - NODE_ENV=development
+#      - REACT_APP_BACKEND_URL=http://backend:8008
+#      - DANGEROUSLY_DISABLE_HOST_CHECK=true
+#    restart: unless-stopped
+#    depends_on:
+#      - backend
+
+  backup:
+    image: alpine:latest
+    volumes:
+      - ./backend:/backup/backend
+      - ./frontend:/backup/frontend
+      - backend_data:/backup/data
+      - resume_storage:/backup/resumes
+      - postgres_data:/backup/postgres_data
+      - ./backups:/backups
+    command: |
+      /bin/sh -c '
+        apk add --no-cache tar gzip 
+        mkdir -p /backups
+        echo "Creating backup..."
+        DATE=$$(date +%Y%m%d_%H%M%S)
+        tar -czf /backups/resumeai_backup_$$DATE.tar.gz /backup
+        echo "Backup created at /backups/resumeai_backup_$$DATE.tar.gz"
+        echo "Sleeping for 24 hours..."
+        sleep 86400
+      '
+    restart: unless-stopped
+
+volumes:
+  backend_data:
+  resume_storage:
+  postgres_data:
