@@ -21,6 +21,10 @@ PG_USER = os.getenv("PG_USER", "postgres")
 PG_PASSWORD = os.getenv("PG_PASSWORD", "postgres")
 PG_DATABASE = os.getenv("PG_DATABASE", "resumeai")
 
+# Override PG_HOST if it's set to "db" and we're not in Docker
+if PG_HOST == "db" and not os.path.exists("/.dockerenv"):
+    PG_HOST = "localhost"
+
 # Default prompt template
 DEFAULT_PROMPT_TEMPLATE = """
 Je bent een ervaren HR-specialist die helpt bij het evalueren van CV's voor vacatures.

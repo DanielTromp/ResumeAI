@@ -24,7 +24,7 @@ from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 
 # Import routers
-from app.routers import vacancies, resumes, settings, process, tasks
+from app.routers import vacancies, resumes, settings, process, tasks, migration
 
 # Import database
 from app.database.base import get_db, init_db
@@ -182,6 +182,7 @@ app.include_router(resumes.router, prefix="/api/resumes", tags=["resumes"])
 app.include_router(settings.router, prefix="/api/settings", tags=["settings"])
 app.include_router(process.router, prefix="/api/process", tags=["process"])
 app.include_router(tasks.router, prefix="/api/tasks", tags=["tasks"])
+app.include_router(migration.router, prefix="/api/migration", tags=["migration"])
 
 # Root endpoint
 @app.get("/")
