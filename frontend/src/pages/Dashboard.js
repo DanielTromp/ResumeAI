@@ -45,7 +45,7 @@ const Dashboard = () => {
         // Create axios instance with consistent base URL
         const api = axios.create({
           baseURL: baseURL,
-          timeout: 5000,
+          timeout: 30000,
         });
         
         // Log request info before making requests

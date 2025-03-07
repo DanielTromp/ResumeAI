@@ -58,6 +58,13 @@ class Settings(BaseModel):
     match_threshold: Optional[float] = None
     match_count: Optional[int] = None
     resume_prompt_template: Optional[str] = None
+    
+    # Scheduler settings
+    scheduler_enabled: Optional[bool] = None
+    scheduler_start_hour: Optional[int] = None
+    scheduler_end_hour: Optional[int] = None
+    scheduler_interval_minutes: Optional[int] = None
+    scheduler_days: Optional[str] = None
 
 class SettingsUpdate(BaseModel):
     """Model for updating application settings"""
@@ -94,6 +101,13 @@ class SettingsUpdate(BaseModel):
     match_threshold: Optional[float] = None
     match_count: Optional[int] = None
     resume_prompt_template: Optional[str] = None
+    
+    # Scheduler settings
+    scheduler_enabled: Optional[bool] = None
+    scheduler_start_hour: Optional[int] = None
+    scheduler_end_hour: Optional[int] = None
+    scheduler_interval_minutes: Optional[int] = None
+    scheduler_days: Optional[str] = None
 
 @router.get("/", response_model=Settings)
 async def get_settings():
@@ -143,7 +157,14 @@ async def get_settings():
             ai_model=os.getenv("AI_MODEL", "gpt-4o-mini"),
             match_threshold=float(os.getenv("MATCH_THRESHOLD", "0.75")),
             match_count=int(os.getenv("MATCH_COUNT", "20")),
-            resume_prompt_template=os.getenv("RESUME_PROMPT_TEMPLATE", DEFAULT_PROMPT_TEMPLATE)
+            resume_prompt_template=os.getenv("RESUME_PROMPT_TEMPLATE", DEFAULT_PROMPT_TEMPLATE),
+            
+            # Scheduler settings
+            scheduler_enabled=os.getenv("SCHEDULER_ENABLED", "false").lower() == "true",
+            scheduler_start_hour=int(os.getenv("SCHEDULER_START_HOUR", "6")),
+            scheduler_end_hour=int(os.getenv("SCHEDULER_END_HOUR", "20")),
+            scheduler_interval_minutes=int(os.getenv("SCHEDULER_INTERVAL_MINUTES", "60")),
+            scheduler_days=os.getenv("SCHEDULER_DAYS", "mon,tue,wed,thu,fri")
         )
         
         return settings
@@ -172,56 +193,112 @@ async def update_settings(settings: SettingsUpdate):
                     key, value = line.split("=", 1)
                     current_env[key] = value.strip('"\'')
         
-        # Update with new values
-        updates = {k: v for k, v in settings.model_dump().items() if v is not None}
-        
-        # Map Pydantic model keys to environment variable names
+        # Map Pydantic model keys to environment variable names and their "masked" state in the UI
         env_mapping = {
-            "openai_api_key": "OPENAI_API_KEY",
+            "openai_api_key": {"env_key": "OPENAI_API_KEY", "is_masked": True},
             
             # Database settings
-            "database_provider": "DATABASE_PROVIDER",
+            "database_provider": {"env_key": "DATABASE_PROVIDER", "is_masked": False},
             
             # Supabase settings
-            "supabase_url": "SUPABASE_URL",
-            "supabase_key": "SUPABASE_KEY",
-            "supabase_resume_table": "SUPABASE_RESUME_TABLE",
+            "supabase_url": {"env_key": "SUPABASE_URL", "is_masked": False},
+            "supabase_key": {"env_key": "SUPABASE_KEY", "is_masked": True},
+            "supabase_resume_table": {"env_key": "SUPABASE_RESUME_TABLE", "is_masked": False},
             
             # PostgreSQL settings
-            "pg_host": "PG_HOST",
-            "pg_port": "PG_PORT",
-            "pg_user": "PG_USER",
-            "pg_password": "PG_PASSWORD",
-            "pg_database": "PG_DATABASE",
+            "pg_host": {"env_key": "PG_HOST", "is_masked": False},
+            "pg_port": {"env_key": "PG_PORT", "is_masked": False},
+            "pg_user": {"env_key": "PG_USER", "is_masked": False},
+            "pg_password": {"env_key": "PG_PASSWORD", "is_masked": True},
+            "pg_database": {"env_key": "PG_DATABASE", "is_masked": False},
             
             # NocoDB settings
-            "nocodb_url": "NOCODB_URL",
-            "nocodb_token": "NOCODB_TOKEN",
-            "nocodb_project": "NOCODB_PROJECT",
-            "nocodb_table": "NOCODB_TABLE",
+            "nocodb_url": {"env_key": "NOCODB_URL", "is_masked": False},
+            "nocodb_token": {"env_key": "NOCODB_TOKEN", "is_masked": True},
+            "nocodb_project": {"env_key": "NOCODB_PROJECT", "is_masked": False},
+            "nocodb_table": {"env_key": "NOCODB_TABLE", "is_masked": False},
             
             # Spinweb settings
-            "spinweb_user": "SPINWEB_USER",
-            "spinweb_pass": "SPINWEB_PASS",
+            "spinweb_user": {"env_key": "SPINWEB_USER", "is_masked": False},
+            "spinweb_pass": {"env_key": "SPINWEB_PASS", "is_masked": True},
             
             # Matching settings
-            "excluded_clients": "EXCLUDED_CLIENTS",
-            "ai_model": "AI_MODEL",
-            "match_threshold": "MATCH_THRESHOLD",
-            "match_count": "MATCH_COUNT",
-            "resume_prompt_template": "RESUME_PROMPT_TEMPLATE"
+            "excluded_clients": {"env_key": "EXCLUDED_CLIENTS", "is_masked": False},
+            "ai_model": {"env_key": "AI_MODEL", "is_masked": False},
+            "match_threshold": {"env_key": "MATCH_THRESHOLD", "is_masked": False},
+            "match_count": {"env_key": "MATCH_COUNT", "is_masked": False},
+            "resume_prompt_template": {"env_key": "RESUME_PROMPT_TEMPLATE", "is_masked": False},
+            
+            # Scheduler settings
+            "scheduler_enabled": {"env_key": "SCHEDULER_ENABLED", "is_masked": False},
+            "scheduler_start_hour": {"env_key": "SCHEDULER_START_HOUR", "is_masked": False},
+            "scheduler_end_hour": {"env_key": "SCHEDULER_END_HOUR", "is_masked": False},
+            "scheduler_interval_minutes": {"env_key": "SCHEDULER_INTERVAL_MINUTES", "is_masked": False},
+            "scheduler_days": {"env_key": "SCHEDULER_DAYS", "is_masked": False}
         }
         
+        # Filter out "masked" values that weren't actually changed
+        filtered_updates = {}
+        for key, value in settings.model_dump().items():
+            if value is None:
+                continue
+            
+            mapping = env_mapping.get(key)
+            if not mapping:
+                continue
+                
+            # If this is a masked field (like a password), and the value is "*****",
+            # then it wasn't really changed - the UI just sent back the masked value
+            if mapping["is_masked"] and value == "*****":
+                logger.info(f"Skipping masked field {key} with value '*****' (not actually changed)")
+                continue
+                
+            # Otherwise, this field was actually changed
+            filtered_updates[key] = value
+        
+        logger.info(f"Actually updating {len(filtered_updates)} fields: {list(filtered_updates.keys())}")
+        
         # Update the environment variables
-        for key, value in updates.items():
-            env_key = env_mapping.get(key)
-            if env_key:
+        for key, value in filtered_updates.items():
+            mapping = env_mapping.get(key)
+            if mapping:
+                env_key = mapping["env_key"]
                 current_env[env_key] = str(value)
+        
+        # Write back to .env file, preserving format for sensitive fields
+        # Get the original .env content to keep the format for unchanged lines
+        original_env_lines = []
+        try:
+            with open(".env", "r") as f:
+                original_env_lines = f.readlines()
+        except Exception as read_error:
+            logger.warning(f"Could not read original .env format: {str(read_error)}")
+        
+        # Create a mapping of keys to their original lines (with formatting)
+        original_line_map = {}
+        for line in original_env_lines:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key = line.split("=", 1)[0].strip()
+                original_line_map[key] = line
         
         # Write back to .env file
         with open(".env", "w") as f:
             for key, value in current_env.items():
-                f.write(f"{key}=\"{value}\"\n")
+                # Check if the key was in the filtered updates
+                env_key_in_updates = False
+                for model_key, mapping in env_mapping.items():
+                    if mapping["env_key"] == key and model_key in filtered_updates:
+                        env_key_in_updates = True
+                        break
+                
+                # If the key wasn't updated, use the original line format
+                if not env_key_in_updates and key in original_line_map:
+                    f.write(f"{original_line_map[key]}\n")
+                else:
+                    # For updated keys, or if we don't have the original format,
+                    # use the standard format
+                    f.write(f"{key}=\"{value}\"\n")
         
         # Return updated settings (with redacted sensitive values)
         return await get_settings()

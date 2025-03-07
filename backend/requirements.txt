@@ -30,3 +30,4 @@ pypdf>=3.16.0
 PyPDF2>=3.0.1
 numpy>=1.26.0
 tqdm>=4.66.1
+schedule>=1.2.0

@@ -43,21 +43,23 @@ services:
       db:
         condition: service_healthy
 
-# Frontend disabled as requested - running manually
+# Frontend with authentication
 #  frontend:
 #    build:
 #      context: ./frontend
-#      dockerfile: Dockerfile.dev
+#      dockerfile: Dockerfile
 #    ports:
-#      - "3000:3000"
-#    volumes:
-#      - ./frontend:/app
-#      - /app/node_modules
+#      - "3000:80"
 #    environment:
-#      - NODE_ENV=development
-#      - REACT_APP_BACKEND_URL=http://backend:8008
-#      - DANGEROUSLY_DISABLE_HOST_CHECK=true
+#      - AUTH_USERNAME=admin
+#      - AUTH_PASSWORD=resumeai
+#      # Use IP address for backend to avoid Docker network DNS issues
+#      # When running on Cloudflare Tunnel, set this to your actual backend URL
+#      - BACKEND_URL=http://backend:8008
 #    restart: unless-stopped
+    # Use host network to improve connectivity
+    # This may be needed in some environments
+    # network_mode: host
 #    depends_on:
 #      - backend
 

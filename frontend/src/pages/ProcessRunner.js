@@ -11,12 +11,16 @@ import {
   TextField,
   IconButton,
   Snackbar,
-  LinearProgress
+  LinearProgress,
+  Grid
 } from '@mui/material';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import axios from 'axios';
+
+// Import scheduler status component
+import SchedulerStatus from '../components/SchedulerStatus';
 
 const ProcessRunner = () => {
   const [loading, setLoading] = useState(false);
@@ -204,6 +208,9 @@ const ProcessRunner = () => {
           <div ref={logEndRef} />
         </Box>
       </Paper>
+      
+      {/* Scheduler Status */}
+      <SchedulerStatus />
       
       {/* Notifications */}
       <Snackbar

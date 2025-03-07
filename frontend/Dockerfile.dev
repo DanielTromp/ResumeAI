@@ -7,7 +7,7 @@ COPY package*.json ./
 
 # Update the proxy setting to backend container
 # This is the Docker service name that will be resolved in the Docker network
-RUN sed -i 's/"proxy": "http:\/\/localhost:8000"/"proxy": "http:\/\/backend:8008"/' package.json
+RUN sed -i 's/"proxy": "http:\/\/localhost:8008"/"proxy": "http:\/\/backend:8008"/' package.json
 
 # Install dependencies
 RUN npm install

@@ -2,6 +2,7 @@
 Process Router
 
 This module provides API endpoints for running the combined vacancy and resume matching process.
+It also exposes endpoints to control the scheduler for automatic runs.
 """
 
 import asyncio
@@ -9,7 +10,7 @@ import logging
 import sys
 import io
 import importlib
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 import time
@@ -19,6 +20,9 @@ import threading
 # Get the combined_process_main function - using a safer approach
 # Import a reference to the module first
 from app import combined_process
+
+# Import the scheduler service
+from app.services.scheduler_service import scheduler_service
 
 # Create router
 router = APIRouter()
@@ -39,6 +43,18 @@ class ProcessOutput(BaseModel):
     process_id: str
     status: str
     logs: List[str] = []
+    
+class SchedulerStatus(BaseModel):
+    enabled: bool
+    running: bool
+    jobs_count: int
+    active_hours: str
+    interval_minutes: int
+    active_days: List[str]
+    next_run: Optional[str] = None
+    
+class SchedulerAction(BaseModel):
+    action: str
     
 # Store the process status and logs
 process_status = {
@@ -193,3 +209,54 @@ async def get_process_status():
         status=process_status["status"],
         logs=process_status["logs"]
     )
+
+# Scheduler endpoints
+@router.get("/scheduler/status", response_model=SchedulerStatus)
+async def get_scheduler_status():
+    """
+    Get the status of the scheduler.
+    """
+    # Update scheduler configuration in case it was changed
+    scheduler_service.update_config()
+    
+    # Get the status
+    status = scheduler_service.status()
+    
+    return SchedulerStatus(**status)
+
+@router.post("/scheduler/control")
+async def control_scheduler(action: SchedulerAction):
+    """
+    Control the scheduler (start, stop, update).
+    """
+    if action.action == "start":
+        # Make sure configuration is up to date
+        scheduler_service.update_config()
+        
+        # Start the scheduler
+        result = scheduler_service.start()
+        if result:
+            return {"status": "success", "message": "Scheduler started"}
+        else:
+            return {"status": "error", "message": "Failed to start scheduler (check if enabled)"}
+    elif action.action == "stop":
+        # Stop the scheduler
+        scheduler_service.stop()
+        return {"status": "success", "message": "Scheduler stopped"}
+    elif action.action == "update":
+        # Update scheduler configuration
+        scheduler_service.update_config()
+        return {"status": "success", "message": "Scheduler configuration updated"}
+    else:
+        raise HTTPException(status_code=400, detail=f"Invalid action: {action.action}")
+
+@router.get("/scheduler/next-run")
+async def get_next_run():
+    """
+    Get the next scheduled run time.
+    """
+    status = scheduler_service.status()
+    if status["next_run"]:
+        return {"next_run": status["next_run"]}
+    else:
+        return {"next_run": None}

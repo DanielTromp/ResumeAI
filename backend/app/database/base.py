@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 class DatabaseInterface:
     """Abstract base class for database operations"""
     
-    async def get_all_vacancies(self) -> List[Dict[str, Any]]:
+    async def get_all_vacancies(self, force_refresh: bool = False) -> List[Dict[str, Any]]:
         raise NotImplementedError
     
     async def get_vacancy(self, vacancy_id: str) -> Optional[Dict[str, Any]]:
@@ -66,7 +66,7 @@ class SQLiteDatabase(DatabaseInterface):
     async def _get_connection(self):
         return await aiosqlite.connect(self.db_path)
     
-    async def get_all_vacancies(self) -> List[Dict[str, Any]]:
+    async def get_all_vacancies(self, force_refresh: bool = False) -> List[Dict[str, Any]]:
         async with await self._get_connection() as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.execute("SELECT * FROM vacancies ORDER BY geplaatst DESC")
@@ -144,6 +144,7 @@ class NocoDBDatabase(DatabaseInterface):
     
     async def get_all_vacancies(self, force_refresh: bool = False) -> List[Dict[str, Any]]:
         # The nocodb client is synchronous, so we need to adapt it
+        # We pass the force_refresh parameter to bypass caching when needed
         return self.client.get_all_listings(force_refresh=force_refresh)
     
     async def get_vacancy(self, vacancy_id: str) -> Optional[Dict[str, Any]]:
