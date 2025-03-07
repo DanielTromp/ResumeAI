@@ -24,7 +24,7 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import EditIcon from '@mui/icons-material/Edit';
 import SaveIcon from '@mui/icons-material/Save';
 import DeleteIcon from '@mui/icons-material/Delete';
-import axios from 'axios';
+import { getVacancyById, updateVacancy, deleteVacancy } from '../utils/api';
 
 const VacancyDetail = () => {
   const { id } = useParams();
@@ -71,7 +71,7 @@ const VacancyDetail = () => {
       try {
         setLoading(true);
         console.log('Fetching vacancy with ID:', id);
-        const response = await axios.get(`/api/vacancies/${id}`);
+        const response = await getVacancyById(id);
         console.log('Vacancy response data:', response.data);
         
         // Check for valid data structure before setting state
@@ -113,7 +113,7 @@ const VacancyDetail = () => {
   const handleSave = async () => {
     try {
       setLoading(true);
-      const response = await axios.put(`/api/vacancies/${id}`, editedVacancy);
+      const response = await updateVacancy(id, editedVacancy);
       setVacancy(response.data);
       setEditing(false);
       setLoading(false);
@@ -128,7 +128,7 @@ const VacancyDetail = () => {
     if (window.confirm('Are you sure you want to delete this vacancy?')) {
       try {
         setLoading(true);
-        await axios.delete(`/api/vacancies/${id}`);
+        await deleteVacancy(id);
         navigate('/vacancies');
       } catch (err) {
         console.error('Error deleting vacancy:', err);

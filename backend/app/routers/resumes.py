@@ -16,8 +16,8 @@ import glob
 import PyPDF2
 from pathlib import Path as FilePath
 
-from app.database.base import DatabaseInterface, get_db
 from app.models.resume import Resume, ResumeCreate, ResumeUpdate, ResumeList, ResumeFile
+from starlette.concurrency import run_in_threadpool
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -32,8 +32,7 @@ router = APIRouter()
 async def get_resumes(
     skip: int = Query(0, description="Number of items to skip"),
     limit: int = Query(100, description="Number of items to return"),
-    search: str = Query(None, description="Search term for filtering resumes"),
-    db: DatabaseInterface = Depends(get_db)
+    search: str = Query(None, description="Search term for filtering resumes")
 ):
     """
     Get a list of resumes with pagination.
@@ -189,8 +188,7 @@ async def get_resume_by_name(
 
 @router.post("/", response_model=Resume, status_code=201)
 async def create_resume(
-    resume: ResumeCreate,
-    db: DatabaseInterface = Depends(get_db)
+    resume: ResumeCreate
 ):
     """
     Create a new resume from JSON data.

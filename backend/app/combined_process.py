@@ -5,9 +5,9 @@ Combined Vacancy & Resume Matching Process
 This script performs both the scraping of Spinweb vacancies and the matching 
     with resumes in a single integrated process:
 1. Scraping of new Spinweb vacancies
-2. Processing and saving in NocoDB
+2. Processing and saving in PostgreSQL
 3. Matching CVs with new vacancies
-4. Updating match results in NocoDB
+4. Updating match results in PostgreSQL
 
 Author: Daniel Tromp
 Email: drpgmtromp@gmail.com
@@ -37,13 +37,11 @@ from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode
 
 # Project specific imports
 from app.config import AI_MODEL, EMBEDDING_MODEL, OPENAI_API_KEY
-from app.config import NOCODB_TOKEN, NOCODB_PROJECT, NOCODB_TABLE
 from app.config import PG_HOST, PG_PORT, PG_USER, PG_PASSWORD, PG_DATABASE
 from app.config import URL1_SPINWEB_USER, URL1_SPINWEB_PASS
 from app.config import URL1_PROVIDER_NAME, URL1_LOGIN_URL, URL1_SOURCE
 from app.config import EXCLUDED_CLIENTS, MATCH_THRESHOLD, MATCH_COUNT
 from app.config import RESUME_RPC_FUNCTION_NAME, PROMPT_TEMPLATE
-from app.components.nocodb_client import NocoDBClient
 
 
 # Configureer logging
@@ -83,8 +81,17 @@ enc = tiktoken.encoding_for_model(AI_MODEL)
 # Import database service
 from app.services.database_service import db_service
 
-# Initialize NocoDB client
-nocodb = NocoDBClient()
+# Define a URL normalizer function
+def normalize_url(url):
+    """Normalize URL to a consistent format"""
+    if not url:
+        return ""
+    # Strip protocol
+    url = url.replace("https://", "").replace("http://", "")
+    # Remove trailing slash
+    if url.endswith("/"):
+        url = url[:-1]
+    return url
 
 # Haal versie uit de docstring
 SCRIPT_VERSION = "0.0.0"  # Default waarde
@@ -143,9 +150,6 @@ def extract_data_from_html(html, url):
 def check_environment_variables():
     """Checks if all required configuration variables are set."""
     required_vars = {
-        'NOCODB_TOKEN': NOCODB_TOKEN,
-        'NOCODB_PROJECT': NOCODB_PROJECT,
-        'NOCODB_TABLE': NOCODB_TABLE,
         'URL1_SPINWEB_USER': URL1_SPINWEB_USER,
         'URL1_SPINWEB_PASS': URL1_SPINWEB_PASS,
         'URL1_LOGIN_URL': URL1_LOGIN_URL,
@@ -263,7 +267,7 @@ def process_vacancy(vacancy_id: str, vacancy_text: str, matches: dict) -> tuple[
 
     if best_match:
         new_status = "Open" if best_match["percentage"] >= 60 else "AI afgewezen"
-        # Maak een payload met alle relevante kolommen voor NocoDB
+        # Create a payload with all relevant data
         results = {
             "Status": new_status,
             "Checked_resumes": ", ".join(eval["name"] for eval in top_evaluations),
@@ -284,8 +288,29 @@ async def spider_vacatures():
     """
     progress_logger.info("🔍 Start gecombineerd vacature ophalen & matching process")
 
-    # Cleanup gesloten listings
-    nocodb.cleanup_closed_listings()
+    # Note: Cleanup of closed listings now handled via PostgreSQL
+    try:
+        # Connect to PostgreSQL and mark old listings as closed
+        from app.db_init import get_connection
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # Update listings older than 30 days to "Gesloten"
+        cursor.execute(
+            """
+            UPDATE vacancies 
+            SET status = 'Gesloten', updated_at = NOW()
+            WHERE created_at < NOW() - INTERVAL '30 days' 
+            AND status NOT IN ('Gesloten', 'Geplaatst', 'Afgezegd')
+            """
+        )
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        progress_logger.info("✅ Cleanup of old listings complete")
+    except Exception as e:
+        progress_logger.error(f"❌ Error during cleanup of old listings: {str(e)}")
 
     # Configure the crawler
     browser_config = BrowserConfig(
@@ -366,18 +391,43 @@ async def spider_vacatures():
     # URL normalisatie voor database en crawler
     # Voor database: zonder protocol (spinweb.nl/aanvraag/123)
     # Voor crawler: met protocol (https://spinweb.nl/aanvraag/123)
-    vacancy_links_db = {nocodb.normalize_url(link) for link in vacancy_links}
+    vacancy_links_db = {normalize_url(link) for link in vacancy_links}
     vacancy_links_crawler = {link for link in vacancy_links}  # Behoud originele URLs met protocol
 
     # Maak een mapping van database URLs naar crawler URLs
     vacancy_links_map = {}
     for link in vacancy_links:
-        db_url = nocodb.normalize_url(link)
+        db_url = normalize_url(link)
         vacancy_links_map[db_url] = link  # Gebruik originele URL met protocol voor crawler
 
-    # Normaliseer bestaande listings uit NocoDB
-    existing_aanvragen_urls = {nocodb.normalize_url(url) for url in nocodb.get_existing_listings()}
-    lowest_url = nocodb.normalize_url(nocodb.get_lowest_listing_url())
+    # Get existing vacancy URLs from PostgreSQL
+    try:
+        from app.db_init import get_connection
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT url FROM vacancies")
+        existing_rows = cursor.fetchall()
+        existing_aanvragen_urls = {normalize_url(row[0]) for row in existing_rows if row[0]}
+        cursor.close()
+        conn.close()
+        progress_logger.info(f"Found {len(existing_aanvragen_urls)} existing listings in database")
+    except Exception as e:
+        progress_logger.error(f"Error retrieving existing listings: {str(e)}")
+        existing_aanvragen_urls = set()
+        
+    # Get lowest URL (oldest vacancy) as a cutoff point
+    try:
+        from app.db_init import get_connection
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT url FROM vacancies ORDER BY created_at ASC LIMIT 1")
+        result = cursor.fetchone()
+        lowest_url = normalize_url(result[0]) if result and result[0] else ""
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        progress_logger.error(f"Error retrieving oldest listing: {str(e)}")
+        lowest_url = ""
 
     # Filter new listings (genormaliseerde URLs zonder protocol)
     new_listings_db = {link for link in vacancy_links_db
@@ -419,7 +469,65 @@ async def spider_vacatures():
 
             progress_logger.info(f"Succesvol gecrawled: {crawler_url}")
             markdown_data = extract_data_from_html(result.html, db_url)
-            vacancy_data = nocodb._parse_markdown_data(markdown_data, db_url)
+            
+            # Function to parse markdown data into structured format
+            def parse_markdown_data(markdown, url):
+                """Parse Markdown data into a structured dictionary"""
+                data = {
+                    "Url": url,
+                    "Functie": "",
+                    "Klant": "",
+                    "Functieomschrijving": "",
+                    "Status": "Nieuw",
+                    "Branche": "",
+                    "Regio": "",
+                    "Uren": "",
+                    "Tarief": "",
+                    "Geplaatst": None,
+                    "Sluiting": None
+                }
+                
+                # Parse lines
+                lines = markdown.splitlines()
+                in_functieomschrijving = False
+                func_beschrijving = []
+                
+                for line in lines:
+                    line = line.strip()
+                    if not line:
+                        continue
+                        
+                    if line.startswith("## Functieomschrijving"):
+                        in_functieomschrijving = True
+                        continue
+                        
+                    if in_functieomschrijving:
+                        func_beschrijving.append(line)
+                        continue
+                        
+                    if line.startswith("- **Functie:**"):
+                        data["Functie"] = line.replace("- **Functie:**", "").strip()
+                    elif line.startswith("- **Klant:**"):
+                        data["Klant"] = line.replace("- **Klant:**", "").strip()
+                    elif line.startswith("- **Branche:**"):
+                        data["Branche"] = line.replace("- **Branche:**", "").strip()
+                    elif line.startswith("- **Regio:**"):
+                        data["Regio"] = line.replace("- **Regio:**", "").strip()
+                    elif line.startswith("- **Uren:**"):
+                        data["Uren"] = line.replace("- **Uren:**", "").strip()
+                    elif line.startswith("- **Tarief:**"):
+                        data["Tarief"] = line.replace("- **Tarief:**", "").strip()
+                    elif line.startswith("- **Geplaatst:**"):
+                        data["Geplaatst"] = line.replace("- **Geplaatst:**", "").strip()
+                    elif line.startswith("- **Sluitingsdatum:**"):
+                        data["Sluiting"] = line.replace("- **Sluitingsdatum:**", "").strip()
+                
+                # Join the function description
+                data["Functieomschrijving"] = "\n".join(func_beschrijving)
+                
+                return data
+                
+            vacancy_data = parse_markdown_data(markdown_data, db_url)
             
             # Voeg Model en Version toe aan de vacature data
             vacancy_data["Model"] = AI_MODEL
@@ -429,19 +537,147 @@ async def spider_vacatures():
             client_name = vacancy_data.get("Klant", "").strip()
             if client_name in excluded_clients:
                 progress_logger.info(f"⏭️ Klant '{client_name}' staat op de uitsluitlijst; markeer als AI afgewezen.")
-                vacancy_data["Status"] = "AI afgewezen"
-                vacancy_data["Checked_resumes"] = ""
-                vacancy_data["Top_Match"] = 0
-                vacancy_data["Match Toelichting"] = "Klant staat op de uitsluitlijst"
-                nocodb.update_record(vacancy_data, db_url)
+                
+                # Update PostgreSQL directly
+                try:
+                    from app.db_init import get_connection
+                    conn = get_connection()
+                    cursor = conn.cursor()
+                    
+                    # Check if vacancy already exists
+                    cursor.execute("SELECT id FROM vacancies WHERE url = %s", (db_url,))
+                    existing = cursor.fetchone()
+                    
+                    if existing:
+                        # Update existing record
+                        cursor.execute(
+                            """
+                            UPDATE vacancies 
+                            SET status = 'AI afgewezen',
+                                checked_resumes = '',
+                                top_match = 0,
+                                match_toelichting = %s,
+                                updated_at = NOW()
+                            WHERE url = %s
+                            """,
+                            (json.dumps({"reason": "Klant staat op de uitsluitlijst"}), db_url)
+                        )
+                    else:
+                        # Insert new record
+                        cursor.execute(
+                            """
+                            INSERT INTO vacancies (
+                                url, functie, klant, functieomschrijving, status,
+                                branche, regio, uren, tarief, 
+                                checked_resumes, top_match, match_toelichting,
+                                model, version, created_at, updated_at
+                            ) VALUES (
+                                %s, %s, %s, %s, %s,
+                                %s, %s, %s, %s,
+                                %s, %s, %s,
+                                %s, %s, NOW(), NOW()
+                            )
+                            """,
+                            (
+                                db_url,
+                                vacancy_data.get("Functie", ""),
+                                vacancy_data.get("Klant", ""),
+                                vacancy_data.get("Functieomschrijving", ""),
+                                "AI afgewezen",
+                                vacancy_data.get("Branche", ""),
+                                vacancy_data.get("Regio", ""),
+                                vacancy_data.get("Uren", ""),
+                                vacancy_data.get("Tarief", ""),
+                                "",
+                                0,
+                                json.dumps({"reason": "Klant staat op de uitsluitlijst"}),
+                                vacancy_data.get("Model", ""),
+                                vacancy_data.get("Version", "")
+                            )
+                        )
+                    
+                    conn.commit()
+                    cursor.close()
+                    conn.close()
+                    progress_logger.info(f"✅ Vacancy for excluded client saved to PostgreSQL")
+                except Exception as e:
+                    progress_logger.error(f"❌ Error saving excluded client vacancy: {str(e)}")
+                    if 'conn' in locals() and conn:
+                        conn.rollback()
+                        conn.close()
+                        
                 continue
 
             # Stap 2: CV matching uitvoeren
             vacancy_text = vacancy_data.get("Functieomschrijving", "")
             if not vacancy_text:
-                progress_logger.warning(f"⚠️ Geen functiebeschrijving gevonden voor {db_url}, overslaan.")
-                vacancy_data["Status"] = "Nieuw"  # Changed from "Nieuw - Geen beschrijving" to valid status
-                nocodb.update_record(vacancy_data, db_url)
+                progress_logger.warning(f"⚠️ Geen functiebeschrijving gevonden voor {db_url}, markeren als 'AI afgewezen'.")
+                vacancy_data["Status"] = "AI afgewezen"
+                
+                # Update PostgreSQL with rejection status
+                try:
+                    from app.db_init import get_connection
+                    pg_conn = get_connection()
+                    pg_cursor = pg_conn.cursor()
+                    
+                    # Check if vacancy already exists
+                    pg_cursor.execute("SELECT id FROM vacancies WHERE url = %s", (db_url,))
+                    existing = pg_cursor.fetchone()
+                    
+                    if existing:
+                        # Update existing record
+                        pg_cursor.execute(
+                            """
+                            UPDATE vacancies 
+                            SET status = 'AI afgewezen',
+                                checked_resumes = '',
+                                top_match = 0,
+                                match_toelichting = %s,
+                                updated_at = NOW()
+                            WHERE url = %s
+                            """,
+                            (json.dumps({"reason": "Geen functiebeschrijving gevonden"}), db_url)
+                        )
+                    else:
+                        # Insert new record with AI afgewezen status
+                        pg_cursor.execute(
+                            """
+                            INSERT INTO vacancies (
+                                url, functie, klant, status, branche, regio, uren, tarief, 
+                                checked_resumes, top_match, match_toelichting, model, version,
+                                created_at, updated_at
+                            ) VALUES (
+                                %s, %s, %s, %s, %s, %s, %s, %s,
+                                '', 0, %s, %s, %s,
+                                NOW(), NOW()
+                            )
+                            """,
+                            (
+                                db_url,
+                                vacancy_data.get("Functie", ""),
+                                vacancy_data.get("Klant", ""),
+                                "AI afgewezen",
+                                vacancy_data.get("Branche", ""),
+                                vacancy_data.get("Regio", ""),
+                                vacancy_data.get("Uren", ""),
+                                vacancy_data.get("Tarief", ""),
+                                json.dumps({"reason": "Geen functiebeschrijving gevonden"}),
+                                vacancy_data.get("Model", ""),
+                                vacancy_data.get("Version", "")
+                            )
+                        )
+                    
+                    pg_conn.commit()
+                    pg_cursor.close()
+                    pg_conn.close()
+                    progress_logger.info(f"✅ Vacancy without function description marked as AI afgewezen in PostgreSQL")
+                except Exception as pg_error:
+                    progress_logger.error(f"❌ Error saving rejection status for vacancy without description: {str(pg_error)}")
+                    if 'pg_conn' in locals() and pg_conn:
+                        pg_conn.rollback()
+                        pg_conn.close()
+                        
+                # Now we can skip to the next vacancy
                 continue
 
             # Genereer embedding en zoek matches
@@ -450,7 +686,7 @@ async def spider_vacatures():
             
             # Debug info about the embedding
             progress_logger.info(f"Embedding generated: length={len(vacancy_embedding)}")
-            progress_logger.info(f"Using database provider: {db_service.provider}")
+            progress_logger.info("Using PostgreSQL database")
             
             # Save vacancy data to PostgreSQL first
             try:
@@ -522,8 +758,8 @@ async def spider_vacatures():
                                 vacancy_data.get("Uren", ""),
                                 vacancy_data.get("Tarief", ""),
                                 vacancy_data.get("Checked_resumes", ""),
-                                vacancy_data.get("Geplaatst", None),
-                                vacancy_data.get("Sluiting", None),
+                                None if not vacancy_data.get("Geplaatst") else vacancy_data.get("Geplaatst"),
+                                None if not vacancy_data.get("Sluiting") else vacancy_data.get("Sluiting"),
                                 vacancy_data.get("External_id", ""),
                                 vacancy_data.get("Model", ""),
                                 vacancy_data.get("Version", "")
@@ -608,7 +844,7 @@ async def spider_vacatures():
                             pg_conn.rollback()
                             pg_conn.close()
                             
-                    nocodb.update_record(vacancy_data, db_url)
+                    # Already saved to PostgreSQL above
                     continue
 
                 # Verwerk matches
@@ -707,13 +943,8 @@ async def spider_vacatures():
                 vacancy_data["Top_Match"] = 0
                 vacancy_data["Match Toelichting"] = f"Fout tijdens matching: {str(e)[:100]}"
 
-            # Stap 3: Alle data in één keer opslaan
-            progress_logger.info(f"Opslaan van complete vacature data in NocoDB...")
-            success = nocodb.update_record(vacancy_data, db_url)
-            if success:
-                progress_logger.info(f"✅ Vacature {db_url} succesvol opgeslagen")
-            else:
-                progress_logger.error(f"❌ Fout bij opslaan vacature {db_url}")
+            # Step 3: Save all data (already saved to PostgreSQL during processing)
+            progress_logger.info(f"✅ Vacature {db_url} is succesvol verwerkt en opgeslagen in PostgreSQL")
 
         except Exception as e:
             progress_logger.error(f"⚠️ Onverwachte fout bij verwerken vacature {db_url}: {str(e)}", exc_info=True)

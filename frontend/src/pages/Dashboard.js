@@ -17,15 +17,7 @@ import {
 import WorkIcon from '@mui/icons-material/Work';
 import PersonIcon from '@mui/icons-material/Person';
 import SettingsIcon from '@mui/icons-material/Settings';
-import axios from 'axios';
-
-// For debugging network issues and direct API access
-const backendUrl = process.env.REACT_APP_BACKEND_URL || '';
-console.log('Backend URL:', backendUrl);
-
-// We'll use the backend URL directly instead of relying on the proxy
-// This ensures we can access the backend from inside the Docker container
-const baseURL = backendUrl;
+import { getVacancyStats, getResumes } from '../utils/api';
 
 const Dashboard = () => {
   const [stats, setStats] = useState({
@@ -42,32 +34,22 @@ const Dashboard = () => {
       try {
         console.log('Fetching dashboard data...');
         
-        // Create axios instance with consistent base URL
-        const api = axios.create({
-          baseURL: baseURL,
-          timeout: 30000,
-        });
+        // Fetch vacancy statistics - this is more efficient than multiple API calls
+        const statsResponse = await getVacancyStats();
+        console.log('Statistics response:', statsResponse.data);
         
-        // Log request info before making requests
-        console.log('Sending request to:', `${baseURL}/api/vacancies`);
+        // Get the statistics from the response
+        const vacancyStats = statsResponse.data.statistics || {};
         
-        // Fetch vacancies stats
-        const vacanciesResponse = await api.get('/api/vacancies');
-        console.log('Vacancies response:', vacanciesResponse.data);
+        // Get total vacancies from statistics
+        const totalAllVacancies = vacancyStats.total || 0;
         
-        // Get total vacancies from the total_all field (across all statuses)
-        const totalAllVacancies = vacanciesResponse.data.total_all || vacanciesResponse.data.total;
-        
-        // Fetch specifically Open vacancies to get their count
-        const openVacanciesResponse = await api.get('/api/vacancies?status=Open&limit=1');
-        const openVacanciesCount = openVacanciesResponse.data.total;
-        
-        // Fetch specifically New vacancies to get their count
-        const newVacanciesResponse = await api.get('/api/vacancies?status=Nieuw&limit=1');
-        const newVacanciesCount = newVacanciesResponse.data.total;
+        // Get status-specific counts
+        const openVacanciesCount = vacancyStats.Open || 0;
+        const newVacanciesCount = vacancyStats.Nieuw || 0;
         
         // Fetch resumes stats
-        const resumesResponse = await api.get('/api/resumes');
+        const resumesResponse = await getResumes({ limit: 1 });
         
         setStats({
           totalVacancies: totalAllVacancies,

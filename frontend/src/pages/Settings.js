@@ -20,8 +20,6 @@ import Brightness4Icon from '@mui/icons-material/Brightness4';
 import Brightness7Icon from '@mui/icons-material/Brightness7';
 import axios from 'axios';
 import { ColorModeContext } from '../App';
-import DatabaseSelectorMUI from '../components/DatabaseSelectorMUI';
-import DatabaseMigration from '../components/DatabaseMigration';
 
 const Settings = () => {
   const theme = useTheme();
@@ -29,19 +27,11 @@ const Settings = () => {
 
   const [settings, setSettings] = useState({
     openai_api_key: '',
-    database_provider: '',
-    supabase_url: '',
-    supabase_key: '',
-    supabase_resume_table: '',
     pg_host: '',
     pg_port: '',
     pg_user: '',
     pg_password: '',
     pg_database: '',
-    nocodb_url: '',
-    nocodb_token: '',
-    nocodb_project: '',
-    nocodb_table: '',
     spinweb_user: '',
     spinweb_pass: '',
     excluded_clients: '',
@@ -147,11 +137,6 @@ const Settings = () => {
                 </Box>
               </Grid>
               
-              {/* Database Provider */}
-              <Grid item xs={12}>
-                <DatabaseSelectorMUI />
-              </Grid>
-              
               {/* API Configuration */}
               <Grid item xs={12}>
                 <Typography variant="h6" gutterBottom>
@@ -180,46 +165,6 @@ const Settings = () => {
                   value={settings.ai_model}
                   onChange={handleInputChange}
                   helperText="e.g., gpt-4o-mini"
-                />
-              </Grid>
-
-              {/* Supabase Configuration */}
-              <Grid item xs={12}>
-                <Typography variant="h6" gutterBottom sx={{ mt: 2 }}>
-                  Supabase Configuration
-                </Typography>
-                <Divider sx={{ mb: 2 }} />
-              </Grid>
-              
-              <Grid item xs={12} md={6}>
-                <TextField
-                  fullWidth
-                  label="Supabase URL"
-                  name="supabase_url"
-                  value={settings.supabase_url}
-                  onChange={handleInputChange}
-                />
-              </Grid>
-              
-              <Grid item xs={12} md={6}>
-                <TextField
-                  fullWidth
-                  label="Supabase Key"
-                  name="supabase_key"
-                  value={settings.supabase_key}
-                  onChange={handleInputChange}
-                  type="password"
-                />
-              </Grid>
-
-              <Grid item xs={12} md={6}>
-                <TextField
-                  fullWidth
-                  label="Supabase Resume Table"
-                  name="supabase_resume_table"
-                  value={settings.supabase_resume_table}
-                  onChange={handleInputChange}
-                  helperText="Table name for resume data in Supabase"
                 />
               </Grid>
 
@@ -287,54 +232,6 @@ const Settings = () => {
                 />
               </Grid>
 
-              {/* NocoDB Configuration */}
-              <Grid item xs={12}>
-                <Typography variant="h6" gutterBottom sx={{ mt: 2 }}>
-                  NocoDB Configuration
-                </Typography>
-                <Divider sx={{ mb: 2 }} />
-              </Grid>
-              
-              <Grid item xs={12} md={6}>
-                <TextField
-                  fullWidth
-                  label="NocoDB URL"
-                  name="nocodb_url"
-                  value={settings.nocodb_url}
-                  onChange={handleInputChange}
-                />
-              </Grid>
-              
-              <Grid item xs={12} md={6}>
-                <TextField
-                  fullWidth
-                  label="NocoDB Token"
-                  name="nocodb_token"
-                  value={settings.nocodb_token}
-                  onChange={handleInputChange}
-                  type="password"
-                />
-              </Grid>
-              
-              <Grid item xs={12} md={6}>
-                <TextField
-                  fullWidth
-                  label="NocoDB Project"
-                  name="nocodb_project"
-                  value={settings.nocodb_project}
-                  onChange={handleInputChange}
-                />
-              </Grid>
-              
-              <Grid item xs={12} md={6}>
-                <TextField
-                  fullWidth
-                  label="NocoDB Table"
-                  name="nocodb_table"
-                  value={settings.nocodb_table}
-                  onChange={handleInputChange}
-                />
-              </Grid>
 
               {/* Spinweb Configuration */}
               <Grid item xs={12}>
@@ -523,16 +420,6 @@ const Settings = () => {
         </Paper>
       )}
 
-      {/* Database Migration Tool */}
-      {!loading && (
-        <Paper sx={{ p: 3, mt: 4 }}>
-          <Typography variant="h5" gutterBottom>
-            Database Migration
-          </Typography>
-          <Divider sx={{ mb: 3 }} />
-          <DatabaseMigration />
-        </Paper>
-      )}
 
       {/* Success/Error Notifications */}
       <Snackbar

@@ -7,10 +7,7 @@ import {
   Button, 
   CircularProgress,
   Divider,
-  Chip,
   Grid,
-  FormControlLabel,
-  Switch,
   Alert
 } from '@mui/material';
 import { PlayArrow, Stop, Refresh } from '@mui/icons-material';
@@ -108,16 +105,7 @@ const SchedulerStatus = () => {
                 <strong>Enabled:</strong> {status?.enabled ? 'Yes' : 'No'}
               </Typography>
               <Typography variant="body2">
-                <strong>Active Hours:</strong> {status?.active_hours}
-              </Typography>
-              <Typography variant="body2">
-                <strong>Interval:</strong> Every {status?.interval_minutes} minutes
-              </Typography>
-              <Typography variant="body2">
-                <strong>Active Days:</strong> {status?.active_days?.join(', ')}
-              </Typography>
-              <Typography variant="body2">
-                <strong>Scheduled Jobs:</strong> {status?.jobs_count}
+                <strong>Schedule:</strong> {status?.active_days?.join(', ')}, {status?.active_hours}, every {status?.interval_minutes} min
               </Typography>
               <Typography variant="body2">
                 <strong>Next Run:</strong> {status?.next_run || 'Not scheduled'}

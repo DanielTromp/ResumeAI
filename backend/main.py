@@ -24,10 +24,13 @@ from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 
 # Import routers
-from app.routers import vacancies, resumes, settings, process, tasks, migration
+from app.routers import vacancies, resumes, settings, process, tasks, statistics
 
-# Import database
-from app.database.base import get_db, init_db
+# Import db_init for PostgreSQL database initialization
+from app.db_init import initialize_database, get_connection
+
+# Import database utilities
+from app.db_interfaces.postgres import rebuild_vacancy_statistics
 
 # Import scheduler service
 from app.services.scheduler_service import scheduler_service
@@ -35,20 +38,17 @@ from app.services.scheduler_service import scheduler_service
 # Create startup and shutdown events
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Initialize database on startup
+    # Initialize PostgreSQL database with pgvector
     try:
-        await init_db()
-        print("✅ Database initialized successfully")
-    except Exception as e:
-        print(f"⚠️ Error initializing database: {str(e)}")
-        import traceback
-        traceback.print_exc()
-    
-    # Also directly initialize the PostgreSQL database with pgvector
-    try:
-        from app.db_init import initialize_database, get_connection
         initialize_database()
         print("✅ PostgreSQL with pgvector initialized successfully")
+        
+        # Rebuild vacancy statistics to ensure they're accurate
+        try:
+            rebuild_vacancy_statistics()
+            print("✅ Vacancy statistics rebuilt successfully")
+        except Exception as stats_error:
+            print(f"⚠️ Error rebuilding vacancy statistics: {str(stats_error)}")
     except Exception as e:
         print(f"⚠️ PostgreSQL initialization error: {str(e)}")
         import traceback
@@ -182,7 +182,7 @@ app.include_router(resumes.router, prefix="/api/resumes", tags=["resumes"])
 app.include_router(settings.router, prefix="/api/settings", tags=["settings"])
 app.include_router(process.router, prefix="/api/process", tags=["process"])
 app.include_router(tasks.router, prefix="/api/tasks", tags=["tasks"])
-app.include_router(migration.router, prefix="/api/migration", tags=["migration"])
+app.include_router(statistics.router, prefix="/api/statistics", tags=["statistics"])
 
 # Root endpoint
 @app.get("/")

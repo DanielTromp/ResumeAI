@@ -24,7 +24,6 @@ This script will:
 1. Create the PostgreSQL database if it doesn't exist
 2. Set up the pgvector extension
 3. Create the necessary tables and functions
-4. Optionally migrate data from Supabase to PostgreSQL
 
 ## Resume Management
 
