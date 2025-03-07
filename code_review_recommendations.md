@@ -28,7 +28,7 @@ This document contains recommendations for improving the ResumeAI codebase by id
 **Recommendation**:
 - Consolidate into a single management script with arguments: `./manage.sh [backend|frontend|check|backup|restore]`
 - Add a simple help command: `./manage.sh help`
-- Create a simple documentation for the script usage
+- Create simple documentation for the script usage
 
 ## 3. Docker Configuration Files
 
@@ -121,6 +121,35 @@ This document contains recommendations for improving the ResumeAI codebase by id
 - Move specialized documentation to a `/docs` directory
 - Create a simple getting started guide for new developers
 
+## 11. Sensitive Data Management
+
+**Issue**: Sensitive data such as API keys, tokens, and passwords are present in the `.env` files and may have been committed to the repository in the past.
+
+**Recommendation**:
+- Ensure that `.env` files are added to `.gitignore` before committing any sensitive data
+- Remove any committed sensitive data from the Git history using tools like `git filter-branch` or `BFG Repo-Cleaner`
+- Rotate all exposed credentials immediately
+- Consider using a secrets management tool (e.g., Docker Secrets, HashiCorp Vault, AWS Secrets Manager) to securely manage sensitive data
+
+## 12. Code Formatting and Linting
+
+**Issue**: Inconsistent code formatting across the project can lead to readability and maintenance issues.
+
+**Recommendation**:
+- Implement code formatting tools such as Prettier (for JavaScript/React) and Black or Flake8 (for Python)
+- Add configuration files (e.g., `.prettierrc`, `.flake8`) and include linting in the CI/CD pipeline
+- Enforce code style standards through pre-commit hooks
+
+## 13. CI/CD Pipeline Improvements
+
+**Issue**: The current deployment and testing processes may not be fully automated, leading to potential human errors and inconsistencies.
+
+**Recommendation**:
+- Implement a continuous integration/continuous deployment (CI/CD) pipeline using tools such as GitHub Actions, Jenkins, or GitLab CI
+- Automate testing, linting, and dependency vulnerability scanning within the pipeline
+- Use Docker and container orchestration to streamline deployments
+- Ensure that environment-specific configurations and secrets are managed securely in the pipeline
+
 ## Action Plan
 
 1. **Immediate Improvements**:
@@ -137,6 +166,7 @@ This document contains recommendations for improving the ResumeAI codebase by id
    - Refactor database interfaces
    - Implement comprehensive logging strategy
    - Consolidate documentation
+   - Enhance security practices and automate CI/CD processes
 
 ## Conclusion
 
