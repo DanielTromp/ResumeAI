@@ -11,7 +11,7 @@ import os
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
-from app.database.base import DatabaseInterface, get_db
+from app.db_init import get_connection
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -20,20 +20,12 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # Import database service
-from app.services.database_service import db_service, DatabaseService, SUPABASE_AVAILABLE
+from app.services.database_service import db_service, DatabaseService
 
 # Settings model
 class Settings(BaseModel):
     """Application settings model"""
     openai_api_key: Optional[str] = None
-    
-    # Database settings
-    database_provider: Optional[str] = None
-    
-    # Supabase settings
-    supabase_url: Optional[str] = None
-    supabase_key: Optional[str] = None
-    supabase_resume_table: Optional[str] = None
     
     # PostgreSQL settings
     pg_host: Optional[str] = None
@@ -41,12 +33,6 @@ class Settings(BaseModel):
     pg_user: Optional[str] = None
     pg_password: Optional[str] = None
     pg_database: Optional[str] = None
-    
-    # NocoDB settings
-    nocodb_url: Optional[str] = None
-    nocodb_token: Optional[str] = None
-    nocodb_project: Optional[str] = None
-    nocodb_table: Optional[str] = None
     
     # Spinweb settings
     spinweb_user: Optional[str] = None
@@ -70,26 +56,12 @@ class SettingsUpdate(BaseModel):
     """Model for updating application settings"""
     openai_api_key: Optional[str] = None
     
-    # Database settings
-    database_provider: Optional[str] = None
-    
-    # Supabase settings
-    supabase_url: Optional[str] = None
-    supabase_key: Optional[str] = None
-    supabase_resume_table: Optional[str] = None
-    
     # PostgreSQL settings
     pg_host: Optional[str] = None
     pg_port: Optional[str] = None
     pg_user: Optional[str] = None
     pg_password: Optional[str] = None
     pg_database: Optional[str] = None
-    
-    # NocoDB settings
-    nocodb_url: Optional[str] = None
-    nocodb_token: Optional[str] = None
-    nocodb_project: Optional[str] = None
-    nocodb_table: Optional[str] = None
     
     # Spinweb settings
     spinweb_user: Optional[str] = None
@@ -127,26 +99,12 @@ async def get_settings():
         settings = Settings(
             openai_api_key="*****" if os.getenv("OPENAI_API_KEY") else None,
             
-            # Database settings
-            database_provider=os.getenv("DATABASE_PROVIDER", "postgres"),
-            
-            # Supabase settings
-            supabase_url=os.getenv("SUPABASE_URL"),
-            supabase_key="*****" if os.getenv("SUPABASE_KEY") else None,
-            supabase_resume_table=os.getenv("SUPABASE_RESUME_TABLE", "01_OAS"),
-            
             # PostgreSQL settings
             pg_host=os.getenv("PG_HOST", "localhost"),
             pg_port=os.getenv("PG_PORT", "5432"),
             pg_user=os.getenv("PG_USER", "postgres"),
             pg_password="*****" if os.getenv("PG_PASSWORD") else None,
             pg_database=os.getenv("PG_DATABASE", "resumeai"),
-            
-            # NocoDB settings
-            nocodb_url=os.getenv("NOCODB_URL"),
-            nocodb_token="*****" if os.getenv("NOCODB_TOKEN") else None,
-            nocodb_project=os.getenv("NOCODB_PROJECT"),
-            nocodb_table=os.getenv("NOCODB_TABLE"),
             
             # Spinweb settings
             spinweb_user=os.getenv("SPINWEB_USER"),
@@ -197,26 +155,12 @@ async def update_settings(settings: SettingsUpdate):
         env_mapping = {
             "openai_api_key": {"env_key": "OPENAI_API_KEY", "is_masked": True},
             
-            # Database settings
-            "database_provider": {"env_key": "DATABASE_PROVIDER", "is_masked": False},
-            
-            # Supabase settings
-            "supabase_url": {"env_key": "SUPABASE_URL", "is_masked": False},
-            "supabase_key": {"env_key": "SUPABASE_KEY", "is_masked": True},
-            "supabase_resume_table": {"env_key": "SUPABASE_RESUME_TABLE", "is_masked": False},
-            
             # PostgreSQL settings
             "pg_host": {"env_key": "PG_HOST", "is_masked": False},
             "pg_port": {"env_key": "PG_PORT", "is_masked": False},
             "pg_user": {"env_key": "PG_USER", "is_masked": False},
             "pg_password": {"env_key": "PG_PASSWORD", "is_masked": True},
             "pg_database": {"env_key": "PG_DATABASE", "is_masked": False},
-            
-            # NocoDB settings
-            "nocodb_url": {"env_key": "NOCODB_URL", "is_masked": False},
-            "nocodb_token": {"env_key": "NOCODB_TOKEN", "is_masked": True},
-            "nocodb_project": {"env_key": "NOCODB_PROJECT", "is_masked": False},
-            "nocodb_table": {"env_key": "NOCODB_TABLE", "is_masked": False},
             
             # Spinweb settings
             "spinweb_user": {"env_key": "SPINWEB_USER", "is_masked": False},
@@ -313,100 +257,31 @@ async def health_check():
     """
     return {"status": "healthy"}
 
-@router.post("/database/switch")
-async def switch_database_provider(provider: str):
-    """
-    Switch database provider.
-    
-    Args:
-        provider: The database provider to switch to ("postgres" or "supabase")
-    """
-    try:
-        logger.info(f"Received request to switch database provider to: {provider}")
-        
-        if provider not in ["postgres", "supabase"]:
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid provider. Must be 'postgres' or 'supabase'"
-            )
-            
-        # Check if Supabase is available when requested
-        if provider == "supabase" and not SUPABASE_AVAILABLE:
-            raise HTTPException(
-                status_code=400,
-                detail="Supabase provider requested but module is not installed. Please install the supabase package."
-            )
-        
-        # Update the provider in memory without checking connections
-        # This allows switching even if one provider is currently unavailable
-        try:
-            old_provider = db_service.provider
-            db_service.provider = provider
-            logger.info(f"Switched database provider from {old_provider} to {provider}")
-            
-            # Try to update the environment variable file
-            try:
-                # Update the provider in the .env file if it exists
-                dotenv_path = os.path.join(os.getcwd(), ".env")
-                if os.path.exists(dotenv_path):
-                    from dotenv import set_key
-                    set_key(dotenv_path, "DATABASE_PROVIDER", provider)
-                    logger.info(f"Updated DATABASE_PROVIDER in .env file to {provider}")
-            except Exception as env_error:
-                logger.warning(f"Error updating .env file: {str(env_error)}")
-                # Continue even if .env update fails - the in-memory change is what matters
-                
-            return {"status": "success", "provider": provider}
-        except Exception as e:
-            logger.error(f"Error changing provider: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Error changing provider: {str(e)}")
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error in switch_database_provider: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
-
 @router.get("/database/status")
 async def get_database_status():
     """
-    Get the status of all configured database providers.
+    Get the status of the PostgreSQL database connection.
     """
     try:
-        # Check connection to all configured providers
+        # Check connection to PostgreSQL
         status = db_service.get_connection_status()
-        
-        # Add current provider
-        status["current_provider"] = db_service.provider
         
         # Add resume counts
         counts = {}
         
-        # Save current provider
-        current_provider = db_service.provider
-        
-        # Create independent database services for counting - this avoids
-        # transaction issues by using completely separate connections
+        # Create independent database service for counting
         if status.get("postgres", False):
             try:
                 # Create a dedicated service instance for this query
-                postgres_service = DatabaseService("postgres")
+                postgres_service = DatabaseService()
                 counts["postgres"] = postgres_service.count_resumes()
             except Exception as e:
                 logger.warning(f"Error counting postgres resumes: {str(e)}")
                 counts["postgres"] = None
-                
-        if status.get("supabase", False):
-            try:
-                # Create a dedicated service instance for this query
-                supabase_service = DatabaseService("supabase")
-                counts["supabase"] = supabase_service.count_resumes()
-            except Exception as e:
-                logger.warning(f"Error counting supabase resumes: {str(e)}")
-                counts["supabase"] = None
         
         # Add counts to status
         status["resume_counts"] = counts
+        status["current_provider"] = "postgres"
         
         return status
     except Exception as e:

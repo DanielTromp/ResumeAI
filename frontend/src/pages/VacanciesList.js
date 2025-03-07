@@ -26,7 +26,7 @@ import {
 import SearchIcon from '@mui/icons-material/Search';
 import AddIcon from '@mui/icons-material/Add';
 import VisibilityIcon from '@mui/icons-material/Visibility';
-import axios from 'axios';
+import { getVacancies } from '../utils/api';
 
 const VacanciesList = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -36,7 +36,7 @@ const VacanciesList = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState(initialStatus);
   const [totalVacancies, setTotalVacancies] = useState(0);
@@ -77,14 +77,19 @@ const VacanciesList = () => {
       try {
         setLoading(true);
         // Prepare query parameters
-        const params = new URLSearchParams();
-        params.append('skip', page * rowsPerPage);
-        params.append('limit', rowsPerPage);
+        const params = {
+          skip: page * rowsPerPage,
+          limit: rowsPerPage
+        };
+        
         if (statusFilter) {
-          params.append('status', statusFilter);
+          params.status = statusFilter;
         }
 
-        const response = await axios.get(`/api/vacancies?${params.toString()}`);
+        console.log('Fetching vacancies with params:', params);
+        const response = await getVacancies(params);
+        
+        console.log(`Received ${response.data.items.length} vacancies with total ${response.data.total}`);
         setVacancies(response.data.items);
         setTotalVacancies(response.data.total);
         setLoading(false);
@@ -254,7 +259,7 @@ const VacanciesList = () => {
               </TableBody>
             </Table>
             <TablePagination
-              rowsPerPageOptions={[5, 10, 25, 50]}
+              rowsPerPageOptions={[25, 50, 100]}
               component="div"
               count={totalVacancies}
               rowsPerPage={rowsPerPage}

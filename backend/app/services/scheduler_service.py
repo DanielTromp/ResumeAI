@@ -84,24 +84,17 @@ class SchedulerService:
             self.start()
     
     def run_process(self):
-        """Run the combined process if within active hours and days"""
+        """Run the combined process - the scheduler already manages when to run it"""
         now = datetime.datetime.now()
-        current_hour = now.hour
-        current_day = now.strftime("%a").lower()
+        logger.info(f"Scheduler running process at {now} (hour={now.hour}, minute={now.minute}, day={now.strftime('%a').lower()})")
         
-        # Check if we're in the active time window
-        if current_hour >= self.start_hour and current_hour < self.end_hour and current_day in self.days:
-            logger.info(f"Scheduler running process at {now}")
-            
-            # Import the combined process function
-            try:
-                from app.combined_process import main as process_main
-                asyncio.run(process_main())
-                logger.info(f"Process completed successfully at {datetime.datetime.now()}")
-            except Exception as e:
-                logger.error(f"Error running process: {str(e)}")
-        else:
-            logger.info(f"Scheduler skipped run at {now} (outside active window)")
+        # Import the combined process function
+        try:
+            from app.combined_process import main as process_main
+            asyncio.run(process_main())
+            logger.info(f"Process completed successfully at {datetime.datetime.now()}")
+        except Exception as e:
+            logger.error(f"Error running process: {str(e)}")
     
     def _run_scheduler(self):
         """Run the scheduler loop in a separate thread"""
@@ -122,6 +115,9 @@ class SchedulerService:
         # Clear any existing jobs
         schedule.clear()
         
+        # Count the total jobs to be scheduled
+        total_jobs = 0
+        
         # Schedule jobs for each active day
         for day in self.days:
             if day in self.day_functions:
@@ -129,15 +125,45 @@ class SchedulerService:
                 for hour in range(self.start_hour, self.end_hour):
                     for minute in range(0, 60, self.interval_minutes):
                         job_time = f"{hour:02d}:{minute:02d}"
+                        # This will actually schedule the job
                         self.day_functions[day].at(job_time).do(self.run_process)
-                        logger.info(f"Scheduled job for {day} at {job_time}")
+                        total_jobs += 1
+                        
+                        # Log only a few sample times for debugging
+                        if total_jobs <= 3:
+                            logger.info(f"Sample scheduled job: {day} at {job_time}")
         
         # Start the scheduler thread
         self.is_running = True
         self.scheduler_thread = Thread(target=self._run_scheduler, daemon=True)
         self.scheduler_thread.start()
         
-        logger.info(f"Scheduler started with {len(schedule.jobs)} jobs")
+        logger.info(f"Scheduler started with {total_jobs} jobs scheduled from {self.start_hour:02d}:00 to {self.end_hour:02d}:00, every {self.interval_minutes} minutes, on {', '.join(self.days)}")
+        
+        # Get and log the next scheduled run time to verify it's correct
+        next_run = self.calculate_next_run()
+        if next_run:
+            logger.info(f"Next scheduled run: {next_run}")
+            
+        # Check if we're already in a time window when the app is starting
+        # If so, run the process once immediately
+        now = datetime.datetime.now()
+        current_hour = now.hour
+        current_minute = now.minute
+        current_day = now.strftime("%a").lower()
+        
+        # Check if this is a time we would normally run
+        in_active_window = (
+            self.start_hour <= current_hour < self.end_hour and 
+            current_day in self.days and 
+            current_minute % self.interval_minutes < 5  # Allow a 5-minute window
+        )
+        
+        if in_active_window:
+            logger.info(f"We're in an active window at {now}, running process immediately")
+            # Start in a separate thread to not block
+            Thread(target=self.run_process, daemon=True).start()
+            
         return True
     
     def stop(self):
@@ -155,8 +181,64 @@ class SchedulerService:
         schedule.clear()
         logger.info("Scheduler stopped")
     
+    def calculate_next_run(self):
+        """Calculate the next run time based on the current schedule configuration"""
+        now = datetime.datetime.now()
+        current_day_name = now.strftime("%a").lower()
+        current_hour = now.hour
+        current_minute = now.minute
+        
+        # Map day names to their position in the week (0 = Monday)
+        day_positions = {
+            'mon': 0, 'tue': 1, 'wed': 2, 'thu': 3, 
+            'fri': 4, 'sat': 5, 'sun': 6
+        }
+        
+        # Get the position of the current day
+        current_day_pos = day_positions.get(current_day_name, 0)
+        
+        # Find the next scheduled time
+        # Try all days starting from today
+        for day_offset in range(7):  # Check the next 7 days
+            # Calculate the day we're checking
+            check_day_pos = (current_day_pos + day_offset) % 7
+            check_day_name = [d for d, p in day_positions.items() if p == check_day_pos][0]
+            
+            # If this day is not in our schedule, skip it
+            if check_day_name not in self.days:
+                continue
+                
+            # Calculate the date for this day
+            check_date = now.date() + datetime.timedelta(days=day_offset)
+            
+            # If we're checking today, we need to find a time later than now
+            if day_offset == 0:
+                # Find the next hour and minute on today's schedule
+                for hour in range(self.start_hour, self.end_hour):
+                    for minute in range(0, 60, self.interval_minutes):
+                        if hour > current_hour or (hour == current_hour and minute > current_minute):
+                            # This is our next run time today
+                            next_run = datetime.datetime.combine(
+                                check_date,
+                                datetime.time(hour, minute)
+                            )
+                            return next_run
+            else:
+                # For future days, just return the first scheduled time
+                next_run = datetime.datetime.combine(
+                    check_date,
+                    datetime.time(self.start_hour, 0)
+                )
+                return next_run
+                
+        # If we get here, no scheduled time was found
+        return None
+        
     def status(self):
         """Get scheduler status"""
+        # Use our own calculation for next run instead of relying on schedule.next_run()
+        next_run = self.calculate_next_run() if self.is_running and self.enabled else None
+        
         return {
             "enabled": self.enabled,
             "running": self.is_running,
@@ -164,7 +246,7 @@ class SchedulerService:
             "active_hours": f"{self.start_hour:02d}:00 - {self.end_hour:02d}:00",
             "interval_minutes": self.interval_minutes,
             "active_days": self.days,
-            "next_run": str(schedule.next_run()) if schedule.next_run() else None
+            "next_run": str(next_run) if next_run else None
         }
 
 # Create a global instance of the scheduler service

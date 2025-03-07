@@ -13,11 +13,6 @@ python-dotenv
 requests
 tiktoken
 
-# Storage backends
-lancedb
-pyairtable
-supabase
-
 # Web scraping and processing
 fake-useragent
 lxml

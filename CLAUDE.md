@@ -373,12 +373,10 @@ docker-compose up -d
 - **Environment Variables:** Store sensitive data in .env file, load with python-dotenv
 
 ## Project Structure
-- **03_ONS:** Latest version using NocoDB backend
-- **02_OCL:** Version using local storage (LanceDB)
-- **01_OAS:** Version using Airtable backend
+The project is organized in a modular fashion with a clear separation between frontend and backend components.
 
 ## Key Dependencies
 - OpenAI API for embeddings and matching (GPT-4o-mini)
 - Playwright for web scraping
-- Supabase for vector storage
-- NocoDB for vacancy storage and tracking
+- PostgreSQL with pgvector for database storage
+- React for the frontend UI

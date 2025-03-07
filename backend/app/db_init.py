@@ -21,6 +21,7 @@ import os
 import sys
 import argparse
 import logging
+import json
 import psycopg2
 import psycopg2.extras
 from dotenv import load_dotenv
@@ -96,9 +97,9 @@ def check_database():
             SELECT table_name FROM information_schema.tables
             WHERE table_schema = 'public' AND table_name = 'resumes'
         """)
-        table_exists = cursor.fetchone() is not None
+        resumes_table_exists = cursor.fetchone() is not None
         
-        if not table_exists:
+        if not resumes_table_exists:
             logger.warning("⚠️ resumes table does not exist")
         else:
             logger.info("✅ resumes table exists")
@@ -110,12 +111,38 @@ def check_database():
                 WHERE table_schema = 'public' AND table_name = 'resumes'
             """)
             columns = cursor.fetchall()
-            logger.info(f"Table columns: {[col[0] for col in columns]}")
+            logger.info(f"Resumes table columns: {[col[0] for col in columns]}")
             
             # Check record count
             cursor.execute("SELECT COUNT(*) FROM resumes")
             count = cursor.fetchone()[0]
-            logger.info(f"Record count: {count}")
+            logger.info(f"Resume records count: {count}")
+            
+        # Check if vacancy_statistics table exists
+        cursor.execute("""
+            SELECT table_name FROM information_schema.tables
+            WHERE table_schema = 'public' AND table_name = 'vacancy_statistics'
+        """)
+        stats_table_exists = cursor.fetchone() is not None
+        
+        if not stats_table_exists:
+            logger.warning("⚠️ vacancy_statistics table does not exist")
+        else:
+            logger.info("✅ vacancy_statistics table exists")
+            
+            # Check table structure
+            cursor.execute("""
+                SELECT column_name, data_type 
+                FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'vacancy_statistics'
+            """)
+            columns = cursor.fetchall()
+            logger.info(f"Statistics table columns: {[col[0] for col in columns]}")
+            
+            # Check record count
+            cursor.execute("SELECT COUNT(*) FROM vacancy_statistics")
+            count = cursor.fetchone()[0]
+            logger.info(f"Statistics records count: {count}")
         
         # Check if vector functions exist
         cursor.execute("""
@@ -133,7 +160,7 @@ def check_database():
         cursor.close()
         conn.close()
         
-        return pgvector_enabled and table_exists
+        return pgvector_enabled and resumes_table_exists and stats_table_exists
     except Exception as e:
         logger.error(f"❌ Error checking database: {str(e)}")
         return False
@@ -162,22 +189,43 @@ def initialize_database():
         """)
         logger.info("✅ Created resumes table")
         
-        # Create vacancies table
+        # Create vacancies table with Dutch field names (to match combined_process.py)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS public.vacancies (
                 id serial PRIMARY KEY,
                 url text UNIQUE,
-                title text,
-                client text,
-                description text,
+                functie text,
+                klant text,
+                functieomschrijving text,
+                branche text,
+                regio text,
+                uren text,
+                tarief text,
                 status text,
+                checked_resumes text,
                 top_match integer,
-                match_details jsonb,
+                match_toelichting jsonb,
+                geplaatst text,
+                sluiting text,
+                external_id text,
+                model text,
+                version text,
                 created_at timestamptz DEFAULT NOW(),
                 updated_at timestamptz DEFAULT NOW()
             )
         """)
         logger.info("✅ Created vacancies table")
+        
+        # Create vacancy_statistics table for faster counts
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS public.vacancy_statistics (
+                id SERIAL PRIMARY KEY,
+                status VARCHAR(255) UNIQUE,
+                count INTEGER DEFAULT 0,
+                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        logger.info("✅ Created vacancy_statistics table")
         
         # Create vector similarity function
         cursor.execute("""
@@ -280,8 +328,12 @@ def add_test_data():
                 # Add test vacancy
                 cursor.execute(
                     """
-                    INSERT INTO vacancies (url, functie, klant, functieomschrijving, status, top_match, match_toelichting, created_at, updated_at) 
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                    INSERT INTO vacancies (
+                        url, functie, klant, functieomschrijving, branche, regio, 
+                        uren, tarief, status, checked_resumes, top_match, match_toelichting,
+                        created_at, updated_at
+                    ) 
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
                     RETURNING id
                     """,
                     (
@@ -289,7 +341,12 @@ def add_test_data():
                         "Test Developer",
                         "Test Client",
                         "This is a test vacancy for a Python developer with 3+ years of experience",
+                        "ICT",
+                        "Amsterdam",
+                        "40 uur",
+                        "€80 - €90",
                         "Nieuw",
+                        "",
                         0,
                         json.dumps({"test": True})
                     )
@@ -299,6 +356,26 @@ def add_test_data():
                 logger.info(f"Database already has {vacancy_count} vacancy records, skipping vacancy test data insertion")
         except Exception as vacancy_error:
             logger.error(f"❌ Error adding test vacancy data: {str(vacancy_error)}")
+            
+        # Initialize vacancy statistics
+        try:
+            # Check if we have stats records
+            cursor.execute("SELECT COUNT(*) FROM vacancy_statistics")
+            stats_count = cursor.fetchone()[0]
+            
+            if stats_count == 0:
+                # Initialize statistics by counting vacancies by status
+                cursor.execute("""
+                INSERT INTO vacancy_statistics (status, count)
+                SELECT status, COUNT(*) 
+                FROM vacancies 
+                GROUP BY status
+                """)
+                logger.info("✅ Initialized vacancy statistics")
+            else:
+                logger.info(f"Database already has vacancy statistics, skipping initialization")
+        except Exception as stats_error:
+            logger.error(f"❌ Error initializing vacancy statistics: {str(stats_error)}")
         
         conn.commit()
         cursor.close()
