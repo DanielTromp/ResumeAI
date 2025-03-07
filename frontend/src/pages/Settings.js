@@ -21,6 +21,7 @@ import Brightness7Icon from '@mui/icons-material/Brightness7';
 import axios from 'axios';
 import { ColorModeContext } from '../App';
 import DatabaseSelectorMUI from '../components/DatabaseSelectorMUI';
+import DatabaseMigration from '../components/DatabaseMigration';
 
 const Settings = () => {
   const theme = useTheme();
@@ -519,6 +520,17 @@ const Settings = () => {
               </Grid>
             </Grid>
           </form>
+        </Paper>
+      )}
+
+      {/* Database Migration Tool */}
+      {!loading && (
+        <Paper sx={{ p: 3, mt: 4 }}>
+          <Typography variant="h5" gutterBottom>
+            Database Migration
+          </Typography>
+          <Divider sx={{ mb: 3 }} />
+          <DatabaseMigration />
         </Paper>
       )}
 

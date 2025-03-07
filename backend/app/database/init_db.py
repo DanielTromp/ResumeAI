@@ -70,5 +70,8 @@ async def init_db():
     elif DB_TYPE.lower() == "nocodb":
         # NocoDB doesn't require initialization
         logger.info("Using NocoDB backend - no initialization required")
+    elif DB_TYPE.lower() == "postgres":
+        # PostgreSQL is initialized separately through migrations
+        logger.info("Using PostgreSQL backend - initialized through migrations")
     else:
         logger.warning(f"Unsupported database type: {DB_TYPE}")

@@ -1,0 +1,3 @@
+"""
+Migration service initialization
+"""

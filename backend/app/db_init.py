@@ -39,18 +39,26 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 # PostgreSQL configuration
-PG_HOST = os.getenv("PG_HOST", "localhost")
+PG_HOST = os.getenv("PG_HOST", "localhost")  # Will be "db" in Docker, "localhost" locally
 PG_PORT = os.getenv("PG_PORT", "5432")
 PG_USER = os.getenv("PG_USER", "postgres")
 PG_PASSWORD = os.getenv("PG_PASSWORD", "postgres")
 PG_DATABASE = os.getenv("PG_DATABASE", "resumeai")
 
+# Override PG_HOST if it's set to "db" and we're not in Docker
+if PG_HOST == "db" and not os.path.exists("/.dockerenv"):
+    PG_HOST = "localhost"
+    logger.warning(f"Detected non-Docker environment, overriding PG_HOST to {PG_HOST}")
+
 def get_connection():
     """Get a PostgreSQL connection"""
-    logger.info(f"Connecting to PostgreSQL at {PG_HOST}:{PG_PORT}")
+    # Determine if we're running in Docker or local environment
+    # Docker setup uses host 'db', local uses 'localhost'
+    host = PG_HOST
+    logger.info(f"Connecting to PostgreSQL at {host}:{PG_PORT}")
     try:
         conn = psycopg2.connect(
-            host=PG_HOST,
+            host=host,
             port=PG_PORT,
             user=PG_USER,
             password=PG_PASSWORD,
@@ -154,6 +162,23 @@ def initialize_database():
         """)
         logger.info("✅ Created resumes table")
         
+        # Create vacancies table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS public.vacancies (
+                id serial PRIMARY KEY,
+                url text UNIQUE,
+                title text,
+                client text,
+                description text,
+                status text,
+                top_match integer,
+                match_details jsonb,
+                created_at timestamptz DEFAULT NOW(),
+                updated_at timestamptz DEFAULT NOW()
+            )
+        """)
+        logger.info("✅ Created vacancies table")
+        
         # Create vector similarity function
         cursor.execute("""
             CREATE OR REPLACE FUNCTION public.match_resumes(
@@ -226,36 +251,64 @@ def add_test_data():
         conn = get_connection()
         cursor = conn.cursor()
         
-        # Check if we already have records
+        # Check if we already have resume records
         cursor.execute("SELECT COUNT(*) FROM resumes")
-        count = cursor.fetchone()[0]
+        resume_count = cursor.fetchone()[0]
         
-        if count > 0:
-            logger.info(f"Database already has {count} records, skipping test data insertion")
-            cursor.close()
-            conn.close()
-            return True
+        if resume_count == 0:
+            # Create dummy embedding (1536 dimensions)
+            dummy_embedding = [0.1] * 1536
+            
+            # Add test record
+            cursor.execute(
+                """
+                INSERT INTO resumes (name, filename, cv_chunk, embedding) 
+                VALUES (%s, %s, %s, %s::vector)
+                """,
+                ("Test User", "test.pdf", "This is a test CV chunk with Python skills and 5 years of experience", dummy_embedding)
+            )
+            logger.info("✅ Added test resume data to the database")
+        else:
+            logger.info(f"Database already has {resume_count} resume records, skipping resume test data insertion")
         
-        # Create dummy embedding (1536 dimensions)
-        dummy_embedding = [0.1] * 1536
+        # Check if we already have vacancy records
+        try:
+            cursor.execute("SELECT COUNT(*) FROM vacancies")
+            vacancy_count = cursor.fetchone()[0]
+            
+            if vacancy_count == 0:
+                # Add test vacancy
+                cursor.execute(
+                    """
+                    INSERT INTO vacancies (url, functie, klant, functieomschrijving, status, top_match, match_toelichting, created_at, updated_at) 
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                    RETURNING id
+                    """,
+                    (
+                        "spinweb.nl/aanvraag/test123",
+                        "Test Developer",
+                        "Test Client",
+                        "This is a test vacancy for a Python developer with 3+ years of experience",
+                        "Nieuw",
+                        0,
+                        json.dumps({"test": True})
+                    )
+                )
+                logger.info("✅ Added test vacancy data to the database")
+            else:
+                logger.info(f"Database already has {vacancy_count} vacancy records, skipping vacancy test data insertion")
+        except Exception as vacancy_error:
+            logger.error(f"❌ Error adding test vacancy data: {str(vacancy_error)}")
         
-        # Add test record
-        cursor.execute(
-            """
-            INSERT INTO resumes (name, filename, cv_chunk, embedding) 
-            VALUES (%s, %s, %s, %s::vector)
-            """,
-            ("Test User", "test.pdf", "This is a test CV chunk with Python skills and 5 years of experience", dummy_embedding)
-        )
         conn.commit()
-        
-        logger.info("✅ Added test data to the database")
-        
         cursor.close()
         conn.close()
         return True
     except Exception as e:
         logger.error(f"❌ Error adding test data: {str(e)}")
+        if 'conn' in locals() and conn:
+            conn.rollback()
+            conn.close()
         return False
 
 def test_vector_search():

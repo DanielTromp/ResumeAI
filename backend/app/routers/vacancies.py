@@ -5,7 +5,7 @@ This module provides API endpoints for managing vacancy data.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Path
-from typing import List, Optional
+from typing import List, Optional, Any, Dict
 import logging
 import os
 import datetime
@@ -107,39 +107,53 @@ async def get_vacancies(
         
         # Sort by Created date if available, otherwise fallback to Geplaatst
         def get_date_for_sorting(vacancy):
-            # First try to use Created field (should be ISO format)
-            created_date = vacancy.get("Created time")
-            if created_date:
+            # First try to use Created field
+            created_date = vacancy.get("Created time") or vacancy.get("created_at")
+            
+            # If it's a datetime object, use it directly
+            if isinstance(created_date, datetime.datetime):
                 return created_date
             
+            if created_date and isinstance(created_date, str):
+                # Try to parse date string
+                try:
+                    return datetime.datetime.fromisoformat(created_date.replace('Z', '+00:00'))
+                except ValueError:
+                    pass
+            
             # Fall back to Geplaatst if no Created field
-            geplaatst = vacancy.get("Geplaatst")
+            geplaatst = vacancy.get("Geplaatst") or vacancy.get("geplaatst")
+            
+            # If no date at all, return a very old date for sorting
             if not geplaatst:
-                return "1900-01-01"  # Default old date for items without date
-            
-            # Try to normalize date format for sorting
-            try:
-                # Check if it's already in ISO format (YYYY-MM-DD)
-                if len(geplaatst) >= 10 and geplaatst[4] == '-' and geplaatst[7] == '-':
-                    return geplaatst
+                return datetime.datetime(1900, 1, 1)
                 
-                # Try DD-MM-YYYY format
-                if len(geplaatst) >= 10 and geplaatst[2] == '-' and geplaatst[5] == '-':
-                    date = datetime.datetime.strptime(geplaatst, "%d-%m-%Y")
-                    return date.strftime("%Y-%m-%d")
+            # If it's already a datetime object, use it
+            if isinstance(geplaatst, datetime.datetime):
+                return geplaatst
                 
-                # Try other common formats
-                for fmt in ["%Y/%m/%d", "%d/%m/%Y", "%m/%d/%Y", "%d.%m.%Y", "%Y.%m.%d"]:
-                    try:
-                        date = datetime.datetime.strptime(geplaatst, fmt)
-                        return date.strftime("%Y-%m-%d")
-                    except ValueError:
-                        continue
-            except Exception as e:
-                logger.warning(f"Error parsing date '{geplaatst}': {str(e)}")
+            # Try to normalize date string format for sorting
+            if isinstance(geplaatst, str):
+                try:
+                    # Check if it's ISO format (YYYY-MM-DD)
+                    if len(geplaatst) >= 10 and geplaatst[4] == '-' and geplaatst[7] == '-':
+                        return datetime.datetime.strptime(geplaatst[:10], "%Y-%m-%d")
+                    
+                    # Try DD-MM-YYYY format
+                    if len(geplaatst) >= 10 and geplaatst[2] == '-' and geplaatst[5] == '-':
+                        return datetime.datetime.strptime(geplaatst[:10], "%d-%m-%Y")
+                    
+                    # Try other common formats
+                    for fmt in ["%Y/%m/%d", "%d/%m/%Y", "%m/%d/%Y", "%d.%m.%Y", "%Y.%m.%d"]:
+                        try:
+                            return datetime.datetime.strptime(geplaatst, fmt)
+                        except ValueError:
+                            continue
+                except Exception as e:
+                    logger.warning(f"Error parsing date '{geplaatst}': {str(e)}")
             
-            # Return as is if we can't parse
-            return geplaatst
+            # If all else fails, return the oldest date for sorting
+            return datetime.datetime(1900, 1, 1)
         
         # Sort the vacancies (newest first)
         filtered_vacancies = sorted(filtered_vacancies, key=get_date_for_sorting, reverse=True)
@@ -199,6 +213,12 @@ async def get_vacancies(
                     vacancy["Match Toelichting"] = match_toelichting
                     vacancy["Match_Toelichting"] = match_toelichting
         
+        # Fix any datetime objects before returning
+        for vacancy in paginated_vacancies:
+            for key, value in vacancy.items():
+                if isinstance(value, datetime.datetime):
+                    vacancy[key] = value.strftime("%Y-%m-%d")
+        
         # Return response with both total counts
         response = VacancyList(
             items=paginated_vacancies, 
@@ -229,15 +249,26 @@ async def get_vacancies(
         logger.error(f"Returning error to client: {message}")
         raise HTTPException(status_code=500, detail=message)
 
-@lru_cache(maxsize=100)
-async def get_vacancy_cached(vacancy_id: str, db: DatabaseInterface):
-    """Cached version of db.get_vacancy to improve performance for repeated requests"""
-    vacancy = await db.get_vacancy(vacancy_id)
-    if not vacancy:
+# Remove the cache decorator which is causing coroutine reuse issues
+async def get_vacancy_direct(vacancy_id: str, db: DatabaseInterface):
+    """Direct version without caching to avoid coroutine reuse issues"""
+    try:
+        # Try looking up by string ID first
+        vacancy = await db.get_vacancy(vacancy_id)
+        if not vacancy:
+            # If not found, try casting to int if it's a numeric string
+            if vacancy_id.isdigit():
+                vacancy = await db.get_vacancy(int(vacancy_id))
+        
+        if vacancy and 'id' in vacancy and not isinstance(vacancy['id'], str):
+            vacancy['id'] = str(vacancy['id'])
+            
+        return vacancy
+    except Exception as e:
+        logger.error(f"Error in get_vacancy_direct: {str(e)}")
         return None
-    return vacancy
 
-@router.get("/{vacancy_id}", response_model=Vacancy)
+@router.get("/{vacancy_id}")  # Remove response_model for debugging
 async def get_vacancy(
     vacancy_id: str = Path(..., description="The ID of the vacancy to get"),
     db: DatabaseInterface = Depends(get_db)
@@ -247,10 +278,17 @@ async def get_vacancy(
     Uses caching for better performance.
     """
     try:
-        # Try to get from cache
-        vacancy = await get_vacancy_cached(vacancy_id, db)
+        # Use direct function instead of cached version to avoid coroutine reuse
+        vacancy = await get_vacancy_direct(vacancy_id, db)
         if not vacancy:
             raise HTTPException(status_code=404, detail=f"Vacancy with ID {vacancy_id} not found")
+        
+        # Convert datetime objects to strings and ensure ID is a string
+        for key, value in vacancy.items():
+            if isinstance(value, datetime.datetime):
+                vacancy[key] = value.strftime("%Y-%m-%d")
+            elif key == 'id' and not isinstance(value, str):
+                vacancy[key] = str(value)
         
         # Check for both versions of field name (with and without underscore)
         match_toelichting = vacancy.get("Match Toelichting") or vacancy.get("Match_Toelichting")
@@ -293,6 +331,22 @@ async def get_vacancy(
                 # Keep original if conversion fails
                 vacancy["Match Toelichting"] = match_toelichting
                 vacancy["Match_Toelichting"] = match_toelichting
+        
+        # Add debugging log
+        logger.info(f"Returning vacancy data: {vacancy}")
+        
+        # Make sure we have all required fields
+        required_fields = ["URL", "id", "Status"]
+        for field in required_fields:
+            if field not in vacancy:
+                logger.error(f"Required field '{field}' missing from vacancy data")
+                # Add fallback values for critical fields
+                if field == "URL":
+                    vacancy[field] = "unknown-url"
+                elif field == "id":
+                    vacancy[field] = str(vacancy_id)
+                elif field == "Status":
+                    vacancy[field] = "Unknown"
         
         return vacancy
     except HTTPException:

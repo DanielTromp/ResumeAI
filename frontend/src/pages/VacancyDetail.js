@@ -70,13 +70,23 @@ const VacancyDetail = () => {
     const fetchVacancy = async () => {
       try {
         setLoading(true);
+        console.log('Fetching vacancy with ID:', id);
         const response = await axios.get(`/api/vacancies/${id}`);
-        setVacancy(response.data);
-        setEditedVacancy(response.data);
-        setLoading(false);
+        console.log('Vacancy response data:', response.data);
+        
+        // Check for valid data structure before setting state
+        if (response.data && response.data.URL) {
+          setVacancy(response.data);
+          setEditedVacancy(response.data);
+          setLoading(false);
+        } else {
+          console.error('Invalid vacancy data received:', response.data);
+          setError('Received invalid vacancy data format from server');
+          setLoading(false);
+        }
       } catch (err) {
         console.error('Error fetching vacancy:', err);
-        setError('Failed to load vacancy details. Please try again later.');
+        setError(`Failed to load vacancy details: ${err.message}`);
         setLoading(false);
       }
     };

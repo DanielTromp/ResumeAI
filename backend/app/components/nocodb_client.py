@@ -451,31 +451,25 @@ class NocoDBClient:
 
     def get_existing_listings(self) -> set:
         """Haalt alle bestaande listings op uit NocoDB met paginering."""
+        # Clear cache to ensure we get the latest data
+        self._listings_cache = {"data": None, "timestamp": 0}
+        
+        # Get all listings (force refresh)
+        all_listings = self.get_all_listings(force_refresh=True)
+        
+        # Extract URLs
         listings = set()
-        page = 1
-        page_size = 1000  # Pas aan indien nodig
-        while True:
-            params = {"page": page, "pageSize": page_size}
-            try:
-                response = requests.get(self.api_endpoint, headers=self.headers, params=params)
-                response.raise_for_status()
-                data = response.json()
-                current_records = data.get("list", [])
-                for record in current_records:
-                    if "URL" in record:
-                        listings.add(record.get("URL"))
-                page_info = data.get("pageInfo", {})
-                if not page_info.get("isLastPage", True):
-                    page += 1
-                else:
-                    break
-            except requests.RequestException as e:
-                self.logger.error("Netwerkfout bij ophalen listings van NocoDB: %s", e)
-                break
-            except Exception as e:
-                self.logger.error("Fout bij ophalen listings: %s", e)
-                break
-        self.logger.info("Gevonden %d bestaande listings", len(listings))
+        for record in all_listings:
+            if "URL" in record:
+                listings.add(record.get("URL"))
+        
+        self.logger.warning(f"Gevonden {len(listings)} bestaande listings")
+        
+        # Log some examples for debugging
+        examples = list(listings)[:5]
+        if examples:
+            self.logger.warning(f"Examples: {examples}")
+            
         return listings
 
     def get_table_schema(self) -> None:
@@ -579,27 +573,14 @@ class NocoDBClient:
     def get_lowest_listing_url(self) -> str:
         """Haalt de URL met de laagste waarde op uit de NocoDB tabel."""
         try:
-            params = {"sort": "URL", "limit": 1}
-            response = requests.get(self.api_endpoint, headers=self.headers, params=params)
-            response.raise_for_status()
-            data = response.json()
-            # Gebruik 'list' in plaats van 'data'
-            records = data.get("list", [])
-            if not records:
-                self.logger.warning("Geen entries gevonden in de tabel")
-                return "https://spinweb.nl/vacature/866905"  # Fallback URL
-                
-            lowest_url = records[0].get("URL", "")
-            if not lowest_url:
-                self.logger.warning("Geen URL gevonden in eerste record")
-                return "https://spinweb.nl/vacature/866905"  # Fallback URL
-                
-            self.logger.info("Laagste URL gevonden: %s", lowest_url)
-            return lowest_url
+            # Using a much lower threshold to ensure we get newer entries
+            # Spinweb URL format is spinweb.nl/aanvraag/{number}
+            # Lower number means older listing
+            return "spinweb.nl/aanvraag/100000"  # This ensures we process newer listings
             
         except Exception as e:
             self.logger.error("Fout bij ophalen laagste URL: %s", str(e))
-            return "https://spinweb.nl/aanvraag/866905"  # Fallback URL
+            return "spinweb.nl/aanvraag/100000"  # Fallback URL
             
     # Simple in-memory cache for listings
     _listings_cache = {

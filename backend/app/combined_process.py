@@ -440,7 +440,7 @@ async def spider_vacatures():
             vacancy_text = vacancy_data.get("Functieomschrijving", "")
             if not vacancy_text:
                 progress_logger.warning(f"⚠️ Geen functiebeschrijving gevonden voor {db_url}, overslaan.")
-                vacancy_data["Status"] = "Nieuw - Geen beschrijving"
+                vacancy_data["Status"] = "Nieuw"  # Changed from "Nieuw - Geen beschrijving" to valid status
                 nocodb.update_record(vacancy_data, db_url)
                 continue
 
@@ -451,6 +451,114 @@ async def spider_vacatures():
             # Debug info about the embedding
             progress_logger.info(f"Embedding generated: length={len(vacancy_embedding)}")
             progress_logger.info(f"Using database provider: {db_service.provider}")
+            
+            # Save vacancy data to PostgreSQL first
+            try:
+                # Create connection to PostgreSQL
+                from app.db_init import get_connection
+                conn = get_connection()
+                cursor = conn.cursor()
+                
+                # Check if vacancy already exists in PostgreSQL
+                cursor.execute(
+                    """
+                    SELECT id FROM vacancies WHERE url = %s
+                    """,
+                    (db_url,)
+                )
+                existing_vacancy = cursor.fetchone()
+                
+                if existing_vacancy:
+                    # Update existing vacancy
+                    vacancy_id = existing_vacancy[0]
+                    progress_logger.info(f"Updating existing vacancy in PostgreSQL (ID: {vacancy_id})")
+                    cursor.execute(
+                        """
+                        UPDATE vacancies 
+                        SET functie = %s, 
+                            klant = %s, 
+                            functieomschrijving = %s, 
+                            status = %s,
+                            updated_at = NOW()
+                        WHERE id = %s
+                        """,
+                        (
+                            vacancy_data.get("Functie", ""),
+                            vacancy_data.get("Klant", ""),
+                            vacancy_data.get("Functieomschrijving", ""),
+                            vacancy_data.get("Status", "Nieuw"),
+                            vacancy_id
+                        )
+                    )
+                else:
+                    # Insert new vacancy
+                    progress_logger.info(f"Inserting new vacancy into PostgreSQL")
+                    try:
+                        # Get all columns from vacancy_data that might need to be inserted
+                        cursor.execute(
+                            """
+                            INSERT INTO vacancies (
+                                url, functie, klant, functieomschrijving, status, 
+                                branche, regio, uren, tarief, checked_resumes, 
+                                geplaatst, sluiting, external_id, model, version,
+                                created_at, updated_at
+                            ) 
+                            VALUES (
+                                %s, %s, %s, %s, %s, 
+                                %s, %s, %s, %s, %s, 
+                                %s, %s, %s, %s, %s,
+                                NOW(), NOW()
+                            )
+                            RETURNING id
+                            """,
+                            (
+                                db_url,
+                                vacancy_data.get("Functie", ""),
+                                vacancy_data.get("Klant", ""),
+                                vacancy_data.get("Functieomschrijving", ""),
+                                vacancy_data.get("Status", "Nieuw"),
+                                vacancy_data.get("Branche", ""),
+                                vacancy_data.get("Regio", ""),
+                                vacancy_data.get("Uren", ""),
+                                vacancy_data.get("Tarief", ""),
+                                vacancy_data.get("Checked_resumes", ""),
+                                vacancy_data.get("Geplaatst", None),
+                                vacancy_data.get("Sluiting", None),
+                                vacancy_data.get("External_id", ""),
+                                vacancy_data.get("Model", ""),
+                                vacancy_data.get("Version", "")
+                            )
+                        )
+                    except Exception as insert_error:
+                        progress_logger.error(f"Error in full insert, trying minimal insert: {str(insert_error)}")
+                        # Fallback to minimal insert if the full insert fails
+                        cursor.execute(
+                            """
+                            INSERT INTO vacancies (url, functie, klant, functieomschrijving, status, created_at, updated_at) 
+                            VALUES (%s, %s, %s, %s, %s, NOW(), NOW())
+                            RETURNING id
+                            """,
+                            (
+                                db_url,
+                                vacancy_data.get("Functie", ""),
+                                vacancy_data.get("Klant", ""),
+                                vacancy_data.get("Functieomschrijving", ""),
+                                vacancy_data.get("Status", "Nieuw")
+                            )
+                        )
+                    vacancy_id = cursor.fetchone()[0]
+                
+                # Commit the transaction
+                conn.commit()
+                cursor.close()
+                conn.close()
+                
+                progress_logger.info(f"Vacancy saved to PostgreSQL with ID: {vacancy_id}")
+            except Exception as pg_error:
+                progress_logger.error(f"Failed to save vacancy to PostgreSQL: {str(pg_error)}")
+                if 'conn' in locals() and conn:
+                    conn.rollback()
+                    conn.close()
             
             try:
                 # Get matches using the database service
@@ -468,6 +576,38 @@ async def spider_vacatures():
                     vacancy_data["Checked_resumes"] = ""
                     vacancy_data["Top_Match"] = 0
                     vacancy_data["Match Toelichting"] = "Geen matches gevonden"
+                    
+                    # Update PostgreSQL with rejection status
+                    try:
+                        from app.db_init import get_connection
+                        pg_conn = get_connection()
+                        pg_cursor = pg_conn.cursor()
+                        
+                        pg_cursor.execute(
+                            """
+                            UPDATE vacancies 
+                            SET status = 'AI afgewezen',
+                                top_match = 0,
+                                match_toelichting = %s,
+                                checked_resumes = '',
+                                updated_at = NOW()
+                            WHERE url = %s
+                            """,
+                            (
+                                json.dumps({"reason": "Geen matches gevonden"}),
+                                db_url
+                            )
+                        )
+                        pg_conn.commit()
+                        pg_cursor.close()
+                        pg_conn.close()
+                        progress_logger.info(f"Rejection status saved to PostgreSQL for {db_url}")
+                    except Exception as pg_error:
+                        progress_logger.error(f"Failed to update rejection status in PostgreSQL: {str(pg_error)}")
+                        if 'pg_conn' in locals() and pg_conn:
+                            pg_conn.rollback()
+                            pg_conn.close()
+                            
                     nocodb.update_record(vacancy_data, db_url)
                     continue
 
@@ -488,12 +628,77 @@ async def spider_vacatures():
                     # Update de vacature data met match resultaten
                     vacancy_data.update(match_results)
                     progress_logger.info(f"Match resultaten toegevoegd aan vacature data")
+                    
+                    # Also update PostgreSQL with match results
+                    try:
+                        from app.db_init import get_connection
+                        pg_conn = get_connection()
+                        pg_cursor = pg_conn.cursor()
+                        
+                        # Store match details in PostgreSQL
+                        pg_cursor.execute(
+                            """
+                            UPDATE vacancies 
+                            SET status = %s,
+                                top_match = %s,
+                                match_toelichting = %s,
+                                checked_resumes = %s,
+                                updated_at = NOW()
+                            WHERE url = %s
+                            """,
+                            (
+                                match_results.get("Status", "AI afgewezen"),
+                                match_results.get("Top_Match", 0),
+                                json.dumps(match_results.get("Match Toelichting", "{}")),
+                                match_results.get("Checked_resumes", ""),
+                                db_url
+                            )
+                        )
+                        pg_conn.commit()
+                        pg_cursor.close()
+                        pg_conn.close()
+                        progress_logger.info(f"Match results saved to PostgreSQL for {db_url}")
+                    except Exception as pg_error:
+                        progress_logger.error(f"Failed to update match results in PostgreSQL: {str(pg_error)}")
+                        if 'pg_conn' in locals() and pg_conn:
+                            pg_conn.rollback()
+                            pg_conn.close()
                 else:
                     progress_logger.warning(f"⚠️ Geen match resultaten gegenereerd")
                     vacancy_data["Status"] = "AI afgewezen"
                     vacancy_data["Checked_resumes"] = ""
                     vacancy_data["Top_Match"] = 0
                     vacancy_data["Match Toelichting"] = "Geen resultaten gegenereerd"
+                    
+                    # Update PostgreSQL with rejection status
+                    try:
+                        from app.db_init import get_connection
+                        pg_conn = get_connection()
+                        pg_cursor = pg_conn.cursor()
+                        
+                        pg_cursor.execute(
+                            """
+                            UPDATE vacancies 
+                            SET status = 'AI afgewezen',
+                                top_match = 0,
+                                match_toelichting = %s,
+                                checked_resumes = '',
+                                updated_at = NOW()
+                            WHERE url = %s
+                            """,
+                            (
+                                json.dumps({"reason": "Geen resultaten gegenereerd"}),
+                                db_url
+                            )
+                        )
+                        pg_conn.commit()
+                        pg_cursor.close()
+                        pg_conn.close()
+                    except Exception as pg_error:
+                        progress_logger.error(f"Failed to update rejection status in PostgreSQL: {str(pg_error)}")
+                        if 'pg_conn' in locals() and pg_conn:
+                            pg_conn.rollback()
+                            pg_conn.close()
 
             except (psycopg2.Error, Exception) as e:
                 progress_logger.error(f"⚠️ Fout bij CV matching: {str(e)}", exc_info=True)
