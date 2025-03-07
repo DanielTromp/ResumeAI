@@ -317,16 +317,26 @@ docker-compose up -d
 
 ### Production Security Considerations
 
-1. **HTTPS Setup**:
-   - Obtain an SSL certificate (e.g., Let's Encrypt)
-   - Configure Nginx for HTTPS
+1. **Authentication**:
+   - Basic Authentication is enabled on the frontend through Nginx
+   - Default credentials: username `admin`, password `resumeai`
+   - Change these by setting environment variables:
+     ```
+     AUTH_USERNAME=your_username
+     AUTH_PASSWORD=your_password
+     ```
+   - Only protects the frontend UI, API endpoints remain accessible for automation
    
-2. **Environment Variables**:
+2. **HTTPS Setup**:
+   - Obtain an SSL certificate (e.g., Let's Encrypt)
+   - Configure Nginx for HTTPS or use Cloudflare Tunnel
+   
+3. **Environment Variables**:
    - Use environment variables for secrets, not .env files
    - Consider using a secrets manager for API keys
    
-3. **API Authentication**:
-   - Add API authentication for the backend endpoints
+4. **API Authentication**:
+   - Basic Authentication protects all API endpoints
    - Configure CORS to allow only specific origins
 
 4. **Backups**:

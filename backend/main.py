@@ -14,9 +14,14 @@ Repository: https://github.com/DanielTromp/ResumeAI
 """
 
 import os
-from fastapi import FastAPI, Depends
+import base64
+import secrets
+from fastapi import FastAPI, Depends, Request, HTTPException, status
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from contextlib import asynccontextmanager
+from dotenv import load_dotenv
 
 # Import routers
 from app.routers import vacancies, resumes, settings, process, tasks
@@ -24,11 +29,20 @@ from app.routers import vacancies, resumes, settings, process, tasks
 # Import database
 from app.database.base import get_db, init_db
 
+# Import scheduler service
+from app.services.scheduler_service import scheduler_service
+
 # Create startup and shutdown events
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Initialize database on startup
-    await init_db()
+    try:
+        await init_db()
+        print("✅ Database initialized successfully")
+    except Exception as e:
+        print(f"⚠️ Error initializing database: {str(e)}")
+        import traceback
+        traceback.print_exc()
     
     # Also directly initialize the PostgreSQL database with pgvector
     try:
@@ -40,9 +54,106 @@ async def lifespan(app: FastAPI):
         import traceback
         traceback.print_exc()
     
+    # Start the scheduler if enabled
+    try:
+        if scheduler_service.enabled:
+            scheduler_service.start()
+            print(f"✅ Scheduler started with {len(scheduler_service.days)} active days")
+        else:
+            print("⚠️ Scheduler is disabled. Enable it in settings to automatically run the process.")
+    except Exception as e:
+        print(f"⚠️ Error starting scheduler: {str(e)}")
+        import traceback
+        traceback.print_exc()
+    
+    print("✅ Application started successfully")
     yield
+    
     # Clean up resources on shutdown
-    pass
+    try:
+        if scheduler_service.is_running:
+            scheduler_service.stop()
+            print("✅ Scheduler stopped")
+    except Exception as e:
+        print(f"⚠️ Error stopping scheduler: {str(e)}")
+    
+    print("✅ Application shutdown completed")
+
+# Load environment variables
+load_dotenv()
+
+# Authentication credentials (read from environment or use defaults)
+AUTH_USERNAME = os.getenv("AUTH_USERNAME", "admin")
+AUTH_PASSWORD = os.getenv("AUTH_PASSWORD", "resumeai")
+
+# Security utilities
+security = HTTPBasic()
+
+def verify_credentials(credentials: HTTPBasicCredentials = Depends(security)):
+    """Verify HTTP Basic Auth credentials"""
+    is_username_correct = secrets.compare_digest(credentials.username, AUTH_USERNAME)
+    is_password_correct = secrets.compare_digest(credentials.password, AUTH_PASSWORD)
+    
+    if not (is_username_correct and is_password_correct):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return credentials.username
+
+# Authentication middleware
+class BasicAuthMiddleware:
+    """Middleware for HTTP Basic Authentication"""
+    
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, request: Request, call_next):
+        # Skip auth for /docs, /openapi.json and /redoc
+        if request.url.path in ["/docs", "/openapi.json", "/redoc"]:
+            return await call_next(request)
+            
+        # Check for Authorization header
+        auth_header = request.headers.get("Authorization")
+        if not auth_header:
+            return JSONResponse(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                content={"detail": "Not authenticated"},
+                headers={"WWW-Authenticate": "Basic"},
+            )
+        
+        # Parse auth header
+        try:
+            scheme, credentials = auth_header.split()
+            if scheme.lower() != "basic":
+                return JSONResponse(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    content={"detail": "Invalid authentication scheme"},
+                    headers={"WWW-Authenticate": "Basic"},
+                )
+                
+            decoded = base64.b64decode(credentials).decode("utf-8")
+            username, password = decoded.split(":")
+            
+            # Verify credentials
+            is_username_correct = secrets.compare_digest(username, AUTH_USERNAME)
+            is_password_correct = secrets.compare_digest(password, AUTH_PASSWORD)
+            
+            if not (is_username_correct and is_password_correct):
+                return JSONResponse(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    content={"detail": "Invalid credentials"},
+                    headers={"WWW-Authenticate": "Basic"},
+                )
+        except Exception:
+            return JSONResponse(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                content={"detail": "Invalid authentication credentials"},
+                headers={"WWW-Authenticate": "Basic"},
+            )
+            
+        return await call_next(request)
 
 # Create the FastAPI app
 app = FastAPI(
@@ -55,11 +166,15 @@ app = FastAPI(
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # For development - restrict in production
+    allow_origins=["*", "http://localhost:3000", "http://127.0.0.1:3000"],  # For development - restrict in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=60 * 60  # Cache preflight requests for 1 hour
 )
+
+# Authentication middleware removed - we'll add it only to the frontend
 
 # Include routers
 app.include_router(vacancies.router, prefix="/api/vacancies", tags=["vacancies"])

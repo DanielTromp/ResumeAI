@@ -28,8 +28,15 @@ const Settings = () => {
 
   const [settings, setSettings] = useState({
     openai_api_key: '',
+    database_provider: '',
     supabase_url: '',
     supabase_key: '',
+    supabase_resume_table: '',
+    pg_host: '',
+    pg_port: '',
+    pg_user: '',
+    pg_password: '',
+    pg_database: '',
     nocodb_url: '',
     nocodb_token: '',
     nocodb_project: '',
@@ -41,6 +48,12 @@ const Settings = () => {
     match_threshold: '',
     match_count: '',
     resume_prompt_template: '',
+    // Scheduler settings
+    scheduler_enabled: false,
+    scheduler_start_hour: '6',
+    scheduler_end_hour: '20',
+    scheduler_interval_minutes: '60',
+    scheduler_days: 'mon,tue,wed,thu,fri',
   });
   
   const [loading, setLoading] = useState(true);
@@ -198,6 +211,81 @@ const Settings = () => {
                 />
               </Grid>
 
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  label="Supabase Resume Table"
+                  name="supabase_resume_table"
+                  value={settings.supabase_resume_table}
+                  onChange={handleInputChange}
+                  helperText="Table name for resume data in Supabase"
+                />
+              </Grid>
+
+              {/* PostgreSQL Configuration */}
+              <Grid item xs={12}>
+                <Typography variant="h6" gutterBottom sx={{ mt: 2 }}>
+                  PostgreSQL Configuration
+                </Typography>
+                <Divider sx={{ mb: 2 }} />
+              </Grid>
+              
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  label="PostgreSQL Host"
+                  name="pg_host"
+                  value={settings.pg_host}
+                  onChange={handleInputChange}
+                  helperText="Hostname or IP address (e.g., localhost, db)"
+                />
+              </Grid>
+              
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  label="PostgreSQL Port"
+                  name="pg_port"
+                  value={settings.pg_port}
+                  onChange={handleInputChange}
+                  helperText="Default: 5432"
+                />
+              </Grid>
+              
+              <Grid item xs={12} md={4}>
+                <TextField
+                  fullWidth
+                  label="PostgreSQL User"
+                  name="pg_user"
+                  value={settings.pg_user}
+                  onChange={handleInputChange}
+                  helperText="Database username"
+                />
+              </Grid>
+              
+              <Grid item xs={12} md={4}>
+                <TextField
+                  fullWidth
+                  label="PostgreSQL Password"
+                  name="pg_password"
+                  value={settings.pg_password}
+                  onChange={handleInputChange}
+                  type="password"
+                  helperText="Database password"
+                />
+              </Grid>
+              
+              <Grid item xs={12} md={4}>
+                <TextField
+                  fullWidth
+                  label="PostgreSQL Database"
+                  name="pg_database"
+                  value={settings.pg_database}
+                  onChange={handleInputChange}
+                  helperText="Database name (e.g., resumeai)"
+                />
+              </Grid>
+
               {/* NocoDB Configuration */}
               <Grid item xs={12}>
                 <Typography variant="h6" gutterBottom sx={{ mt: 2 }}>
@@ -340,6 +428,80 @@ const Settings = () => {
                   rows={20}
                   variant="outlined"
                   helperText="The prompt template used for resume matching. Use {name}, {vacancy_text}, and {cv_text} as placeholders."
+                />
+              </Grid>
+
+              {/* Scheduler Configuration */}
+              <Grid item xs={12}>
+                <Typography variant="h6" gutterBottom sx={{ mt: 2 }}>
+                  Scheduler Configuration
+                </Typography>
+                <Divider sx={{ mb: 2 }} />
+              </Grid>
+              
+              <Grid item xs={12} md={4}>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={settings.scheduler_enabled === true || settings.scheduler_enabled === "true"}
+                      onChange={(e) => handleInputChange({
+                        target: { name: 'scheduler_enabled', value: e.target.checked }
+                      })}
+                      name="scheduler_enabled"
+                      color="primary"
+                    />
+                  }
+                  label="Enable Automatic Process Runs"
+                />
+              </Grid>
+              
+              <Grid item xs={12} md={4}>
+                <TextField
+                  fullWidth
+                  label="Run Interval (minutes)"
+                  name="scheduler_interval_minutes"
+                  value={settings.scheduler_interval_minutes}
+                  onChange={handleInputChange}
+                  type="number"
+                  inputProps={{ min: 15, step: 15 }}
+                  helperText="Minimum 15 minutes"
+                />
+              </Grid>
+              
+              <Grid item xs={12} md={4}>
+                <TextField
+                  fullWidth
+                  label="Active Days"
+                  name="scheduler_days"
+                  value={settings.scheduler_days}
+                  onChange={handleInputChange}
+                  helperText="e.g., mon,tue,wed,thu,fri"
+                />
+              </Grid>
+              
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  label="Start Hour (0-23)"
+                  name="scheduler_start_hour"
+                  value={settings.scheduler_start_hour}
+                  onChange={handleInputChange}
+                  type="number"
+                  inputProps={{ min: 0, max: 23, step: 1 }}
+                  helperText="Active period start time (24h format)"
+                />
+              </Grid>
+              
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  label="End Hour (0-23)"
+                  name="scheduler_end_hour"
+                  value={settings.scheduler_end_hour}
+                  onChange={handleInputChange}
+                  type="number"
+                  inputProps={{ min: 0, max: 23, step: 1 }}
+                  helperText="Active period end time (24h format)"
                 />
               </Grid>
 

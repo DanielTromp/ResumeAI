@@ -16,6 +16,7 @@ import datetime
 import logging
 import requests
 import re
+import time
 from dotenv import load_dotenv
 from datetime import datetime
 
@@ -600,6 +601,12 @@ class NocoDBClient:
             self.logger.error("Fout bij ophalen laagste URL: %s", str(e))
             return "https://spinweb.nl/aanvraag/866905"  # Fallback URL
             
+    # Simple in-memory cache for listings
+    _listings_cache = {
+        "data": None,
+        "timestamp": 0
+    }
+    
     def get_all_listings(self, force_refresh: bool = False) -> list:
         """
         Get all vacancy listings from NocoDB.
@@ -610,6 +617,15 @@ class NocoDBClient:
         Returns:
             List[Dict[str, Any]]: List of vacancy records
         """
+        # Check cache first if not forcing refresh
+        if not force_refresh:
+            current_time = time.time()
+            # Cache expires after 60 seconds
+            if (self._listings_cache["data"] is not None and 
+                current_time - self._listings_cache["timestamp"] < 60):
+                self.logger.info(f"Returning {len(self._listings_cache['data'])} listings from cache")
+                return self._listings_cache["data"]
+        
         # First, try our already-verified API endpoint
         if not self.api_endpoint:
             self.logger.error("No valid API endpoint found for NocoDB")
@@ -813,6 +829,11 @@ class NocoDBClient:
                     break
                 
             self.logger.warning(f"Successfully retrieved {len(all_listings)} listings from NocoDB")
+            
+            # Update the cache
+            self._listings_cache["data"] = all_listings
+            self._listings_cache["timestamp"] = time.time()
+            
             return all_listings
             
         except Exception as e:

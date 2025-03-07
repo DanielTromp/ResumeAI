@@ -10,6 +10,10 @@ import logging
 import os
 import datetime
 import json
+import time
+from functools import lru_cache
+from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 
 from app.database.base import DatabaseInterface, get_db
 from app.models.vacancy import Vacancy, VacancyCreate, VacancyUpdate, VacancyList
@@ -20,25 +24,75 @@ logger = logging.getLogger(__name__)
 # Create router
 router = APIRouter()
 
+# Cache variables
+CACHE_TTL_SECONDS = 60  # Cache expires after 60 seconds
+_vacancies_cache = {
+    "data": None,
+    "timestamp": 0,
+    "is_refreshing": False
+}
+
+# Cache helper functions
+def get_cached_vacancies():
+    """Get vacancies from cache if valid, otherwise return None"""
+    current_time = time.time()
+    if (_vacancies_cache["data"] is not None and 
+        current_time - _vacancies_cache["timestamp"] < CACHE_TTL_SECONDS):
+        return _vacancies_cache["data"]
+    return None
+
+def set_cached_vacancies(data):
+    """Update the vacancies cache"""
+    _vacancies_cache["data"] = data
+    _vacancies_cache["timestamp"] = time.time()
+    _vacancies_cache["is_refreshing"] = False
+
 @router.get("/", response_model=VacancyList)
 async def get_vacancies(
     skip: int = Query(0, description="Number of items to skip"),
     limit: int = Query(100, description="Number of items to return"),
     status: Optional[str] = Query("Open", description="Filter by status (default 'Open')"),
+    force_refresh: bool = Query(False, description="Force refresh from database"),
     db: DatabaseInterface = Depends(get_db)
 ):
     """
     Get a list of vacancies with optional filtering and pagination.
     Default status filter is 'Open'. Sort is by Geplaatst date (newest first).
+    Uses caching for better performance, with a 60-second TTL.
     """
     try:
         # Log the request
-        logger.warning(f"Getting vacancies with skip={skip}, limit={limit}, status={status}")
-        logger.warning(f"Database type: {os.getenv('DB_TYPE', 'unknown')}")
+        logger.info(f"Getting vacancies with skip={skip}, limit={limit}, status={status}, force_refresh={force_refresh}")
+        logger.info(f"Database type: {os.getenv('DB_TYPE', 'unknown')}")
         
-        # Get the vacancies with forced refresh
-        all_vacancies = await db.get_all_vacancies(force_refresh=True)
-        logger.warning(f"Received {len(all_vacancies)} total vacancies from database")
+        # Try to get from cache unless forced refresh
+        all_vacancies = None
+        if not force_refresh:
+            all_vacancies = get_cached_vacancies()
+            if all_vacancies:
+                logger.info(f"Retrieved {len(all_vacancies)} vacancies from cache")
+        
+        # If cache miss or forced refresh, fetch from database
+        if all_vacancies is None:
+            # To avoid multiple simultaneous refreshes, check if already refreshing
+            if _vacancies_cache["is_refreshing"]:
+                logger.info("Another request is already refreshing the cache, using empty temporary result")
+                all_vacancies = []
+            else:
+                _vacancies_cache["is_refreshing"] = True
+                logger.info("Cache miss or forced refresh, fetching from database")
+                
+                # Run the potentially blocking database operation
+                try:
+                    # For NocoDBDatabase, get_all_vacancies returns a coroutine that needs to be awaited
+                    all_vacancies = await db.get_all_vacancies(force_refresh=True)
+                    # Update the cache with the fresh data
+                    set_cached_vacancies(all_vacancies)
+                    logger.info(f"Updated cache with {len(all_vacancies)} vacancies from database")
+                except Exception as db_error:
+                    _vacancies_cache["is_refreshing"] = False
+                    logger.error(f"Error fetching vacancies from database: {str(db_error)}")
+                    raise
         
         # Store total count of ALL vacancies before status filtering
         total_all_statuses = len(all_vacancies)
@@ -175,6 +229,14 @@ async def get_vacancies(
         logger.error(f"Returning error to client: {message}")
         raise HTTPException(status_code=500, detail=message)
 
+@lru_cache(maxsize=100)
+async def get_vacancy_cached(vacancy_id: str, db: DatabaseInterface):
+    """Cached version of db.get_vacancy to improve performance for repeated requests"""
+    vacancy = await db.get_vacancy(vacancy_id)
+    if not vacancy:
+        return None
+    return vacancy
+
 @router.get("/{vacancy_id}", response_model=Vacancy)
 async def get_vacancy(
     vacancy_id: str = Path(..., description="The ID of the vacancy to get"),
@@ -182,9 +244,11 @@ async def get_vacancy(
 ):
     """
     Get a single vacancy by ID.
+    Uses caching for better performance.
     """
     try:
-        vacancy = await db.get_vacancy(vacancy_id)
+        # Try to get from cache
+        vacancy = await get_vacancy_cached(vacancy_id, db)
         if not vacancy:
             raise HTTPException(status_code=404, detail=f"Vacancy with ID {vacancy_id} not found")
         
