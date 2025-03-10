@@ -1038,22 +1038,41 @@ async def spider_vacatures():
             markdown_data = extract_data_from_html(result.html, db_url)
             
             # Function to parse dates into standard format
-            def parse_date(value: str) -> str:
-                """Convert a date string to the standard format."""
+            def parse_date(value: str) -> Optional[str]:
+                """Convert a date string to the standard format or return None if invalid."""
                 if not value:
-                    return ""
+                    return None
+                
+                # Clean the input
+                value = value.strip()
+                
                 try:
                     # Try different date formats
-                    for fmt in ['%d-%m-%Y', '%B %d, %Y', '%Y-%m-%d']:
+                    formats = [
+                        '%d-%m-%Y',     # 14-03-2025
+                        '%d/%m/%Y',     # 14/03/2025
+                        '%Y-%m-%d',     # 2025-03-14
+                        '%B %d, %Y',    # March 14, 2025
+                        '%d %B %Y',     # 14 March 2025
+                        '%d %b %Y'      # 14 Mar 2025
+                    ]
+                    
+                    for fmt in formats:
                         try:
                             date_obj = datetime.datetime.strptime(value, fmt)
-                            return date_obj.strftime('%Y-%m-%d')
+                            # Always return in PostgreSQL-compatible format
+                            formatted_date = date_obj.strftime('%Y-%m-%d')
+                            logging.info(f"Successfully parsed date '{value}' to '{formatted_date}'")
+                            return formatted_date
                         except ValueError:
                             continue
-                    return value
+                    
+                    # If we can't parse the date, return None instead of the raw string
+                    logging.warning(f"Couldn't parse date: '{value}'")
+                    return None
                 except Exception as e:
-                    logging.error(f"Error parsing date: {e}")
-                    return value
+                    logging.error(f"Error parsing date: {value} - {str(e)}")
+                    return None
             
             # Function to parse markdown data into structured format
             def parse_markdown_data(markdown, url):
@@ -1320,6 +1339,9 @@ async def spider_vacatures():
                     # Insert new vacancy
                     progress_logger.info(f"Inserting new vacancy into PostgreSQL")
                     try:
+                        # Log the date values for debugging
+                        progress_logger.info(f"Date values - Geplaatst: {vacancy_data.get('Geplaatst')}, Sluiting: {vacancy_data.get('Sluiting')}")
+                        
                         # Get all columns from vacancy_data that might need to be inserted
                         cursor.execute(
                             """
@@ -1348,8 +1370,8 @@ async def spider_vacatures():
                                 vacancy_data.get("Uren", ""),
                                 vacancy_data.get("Tarief", ""),
                                 vacancy_data.get("Checked_resumes", ""),
-                                vacancy_data.get("Geplaatst", ""),  # Use the date string from vacancy data
-                                vacancy_data.get("Sluiting", ""),  # Use the date string from vacancy data
+                                vacancy_data.get("Geplaatst"),  # Date may be None if parsing failed
+                                vacancy_data.get("Sluiting"),  # Date may be None if parsing failed
                                 vacancy_data.get("External_id", ""),
                                 vacancy_data.get("Model", ""),
                                 vacancy_data.get("Version", "")
@@ -1360,8 +1382,8 @@ async def spider_vacatures():
                         # Fallback to minimal insert if the full insert fails
                         cursor.execute(
                             """
-                            INSERT INTO vacancies (url, functie, klant, functieomschrijving, status, created_at, updated_at) 
-                            VALUES (%s, %s, %s, %s, %s, NOW(), NOW())
+                            INSERT INTO vacancies (url, functie, klant, functieomschrijving, status, geplaatst, sluiting, created_at, updated_at) 
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
                             RETURNING id
                             """,
                             (
@@ -1369,7 +1391,9 @@ async def spider_vacatures():
                                 vacancy_data.get("Functie", ""),
                                 vacancy_data.get("Klant", ""),
                                 vacancy_data.get("Functieomschrijving", ""),
-                                vacancy_data.get("Status", "Nieuw")
+                                vacancy_data.get("Status", "Nieuw"),
+                                vacancy_data.get("Geplaatst"),
+                                vacancy_data.get("Sluiting")
                             )
                         )
                     vacancy_id = cursor.fetchone()[0]
