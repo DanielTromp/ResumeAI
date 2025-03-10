@@ -70,11 +70,11 @@ class DatabaseConfig(BaseModel):
         """
         # Running in Docker - always use 'db'
         if os.path.exists("/.dockerenv") and v != "db":
-            logger.warning(f"Overriding database host from '{v}' to 'db' for Docker environment")
+            print(f"Overriding database host from '{v}' to 'db' for Docker environment")
             return "db"
         # Not in Docker but trying to use Docker service name
         elif not os.path.exists("/.dockerenv") and v == "db":
-            logger.warning(f"Not in Docker environment, overriding database host from 'db' to 'localhost'")
+            print(f"Not in Docker environment, overriding database host from 'db' to 'localhost'")
             return "localhost"
         return v
     

@@ -12,7 +12,7 @@ import uuid
 class VacancyBase(BaseModel):
     """Base vacancy model with common fields"""
     URL: str = Field(..., description="The URL of the vacancy")
-    Status: str = Field("Nieuw", description="The status of the vacancy")
+    Status: Optional[str] = Field("Nieuw", description="The status of the vacancy")
     Functie: Optional[str] = Field(None, description="Job title")
     Klant: Optional[str] = Field(None, description="Client name")
     Branche: Optional[str] = Field(None, description="Industry sector")

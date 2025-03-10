@@ -111,6 +111,7 @@ class SettingsUpdate(BaseModel):
     email_digest_subject: Optional[str] = None
 
 @router.get("/", response_model=Settings)
+@router.get("", response_model=Settings)  # Add route without trailing slash
 async def get_settings():
     """
     Get application settings.

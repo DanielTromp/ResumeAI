@@ -29,6 +29,7 @@ RESUME_FOLDER = os.path.join(os.path.dirname(os.path.dirname(__file__)), "resume
 router = APIRouter()
 
 @router.get("/", response_model=ResumeList)
+@router.get("", response_model=ResumeList)  # Add route without trailing slash
 async def get_resumes(
     skip: int = Query(0, description="Number of items to skip"),
     limit: int = Query(100, description="Number of items to return"),
@@ -454,7 +455,7 @@ async def get_selected_resumes():
     """
     try:
         # Get all resumes
-        all_resumes_response = await get_resumes(skip=0, limit=1000, search=None, db=None)
+        all_resumes_response = await get_resumes(skip=0, limit=1000, search=None)
         all_resumes = all_resumes_response.items
         
         # Filter to only selected resumes

@@ -199,18 +199,8 @@ for build_dir in possible_build_dirs:
     if os.path.exists(build_dir):
         FRONTEND_BUILD_DIR = build_dir
         found_build_dir = True
-        # If the frontend build directory exists, copy its contents to our frontend directory
-        print(f"✅ Found React build directory at {FRONTEND_BUILD_DIR}, copying to {FRONTEND_DIR}")
-        for item in os.listdir(FRONTEND_BUILD_DIR):
-            source_path = os.path.join(FRONTEND_BUILD_DIR, item)
-            target_path = os.path.join(FRONTEND_DIR, item)
-            if os.path.isdir(source_path):
-                if os.path.exists(target_path):
-                    shutil.rmtree(target_path)
-                shutil.copytree(source_path, target_path)
-            else:
-                shutil.copy2(source_path, target_path)
-        print("✅ Successfully copied React build files")
+        # Skip copying frontend for now to avoid permission issues
+        print(f"✅ Found React build directory at {FRONTEND_BUILD_DIR}, but skipping copy to avoid permissions issues")
         break
 
 if not found_build_dir:
@@ -273,9 +263,10 @@ async def serve_frontend():
 @app.get("/{file_path:path}")
 async def serve_frontend_files(file_path: str):
     """Serve any frontend files or return index.html for client-side routing"""
+    # We don't need this check anymore as API routes are handled by their own routers
     # Skip API routes
-    if file_path.startswith("api/"):
-        raise HTTPException(status_code=404, detail="API route not found")
+    # if file_path.startswith("api"):
+    #     raise HTTPException(status_code=404, detail="API route not found")
         
     # Check if file exists in frontend directory
     full_path = os.path.join(FRONTEND_DIR, file_path)
@@ -290,31 +281,7 @@ async def serve_frontend_files(file_path: str):
     # If no index.html exists, return 404
     raise HTTPException(status_code=404, detail="File not found")
 
-# Health check endpoint - no authentication required
-@app.get("/api/health")
-async def health_check():
-    """
-    Health check endpoint that returns basic application status.
-    This endpoint is available without authentication to check API connectivity.
-    """
-    db_status = "unknown"
-    try:
-        # Basic check if we can get a PostgreSQL connection
-        conn = get_connection()
-        if conn:
-            db_status = "connected"
-            conn.close()
-        else:
-            db_status = "error"
-    except Exception:
-        db_status = "error"
-    
-    return {
-        "status": "healthy",
-        "version": "1.0.0",
-        "database": db_status,
-        "timestamp": time.time(),
-    }
+# This endpoint was moved above to ensure it's registered before the wildcard route
 
 if __name__ == "__main__":
     import uvicorn

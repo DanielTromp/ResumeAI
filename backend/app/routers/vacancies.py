@@ -51,6 +51,7 @@ def set_cached_vacancies(data):
     _vacancies_cache["is_refreshing"] = False
 
 @router.get("/", response_model=VacancyList)
+@router.get("", response_model=VacancyList)  # Add route without trailing slash
 async def get_vacancies(
     skip: int = Query(0, description="Number of items to skip"),
     limit: int = Query(10000, description="Number of items to return"),

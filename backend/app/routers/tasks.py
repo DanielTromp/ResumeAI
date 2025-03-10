@@ -78,6 +78,7 @@ def write_tasks(tasks: List[Task]):
         raise HTTPException(status_code=500, detail=f"Error writing tasks: {str(e)}")
 
 @router.get("/", response_model=TaskList)
+@router.get("", response_model=TaskList)  # Add route without trailing slash
 async def get_tasks(
     skip: int = Query(0, description="Number of items to skip"),
     limit: int = Query(100, description="Number of items to return"),
