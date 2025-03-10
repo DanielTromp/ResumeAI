@@ -6,6 +6,11 @@ console.log('Backend URL configured as:', backendUrl);
 console.log('Window location:', window.location.href);
 console.log('Current hostname:', window.location.hostname);
 
+// Special handling for Raspberry Pi
+if (!backendUrl && window.location.hostname === 'localhost') {
+  console.log('Running on localhost, connecting to local backend');
+}
+
 // Function to log API details to help diagnose issues
 const logApiDetails = () => {
   // Get the Docker-related environment variables if available

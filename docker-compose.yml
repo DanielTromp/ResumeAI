@@ -57,24 +57,19 @@ services:
         condition: service_healthy
 
 # Frontend with authentication
-#  frontend:
-#    build:
-#      context: ./frontend
-#      dockerfile: Dockerfile
-#    ports:
-#      - "3000:80"
-#    environment:
-#      - AUTH_USERNAME=admin
-#      - AUTH_PASSWORD=resumeai
-#      # Use IP address for backend to avoid Docker network DNS issues
-#      # When running on Cloudflare Tunnel, set this to your actual backend URL
-#      - BACKEND_URL=http://backend:8008
-#    restart: unless-stopped
-    # Use host network to improve connectivity
-    # This may be needed in some environments
-    # network_mode: host
-#    depends_on:
-#      - backend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_BACKEND_URL=http://localhost:8008
+    restart: unless-stopped
+    # Use host network for Raspberry Pi to fix connectivity issues
+    network_mode: host
+    depends_on:
+      - backend
 
   backup:
     image: alpine:latest

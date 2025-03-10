@@ -5,9 +5,9 @@ WORKDIR /app
 # Copy package.json and package-lock.json
 COPY package*.json ./
 
-# Update the proxy setting to backend container
-# This is the Docker service name that will be resolved in the Docker network
-RUN sed -i 's/"proxy": "http:\/\/localhost:8008"/"proxy": "http:\/\/backend:8008"/' package.json
+# Remove proxy setting and use REACT_APP_BACKEND_URL instead (for Raspberry Pi)
+# Note: We'll set this in the docker-compose environment
+RUN sed -i 's/"proxy": "http:\/\/localhost:8008"//' package.json
 
 # Install dependencies
 RUN npm install
