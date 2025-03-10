@@ -33,10 +33,24 @@ const Dashboard = () => {
     const fetchStats = async () => {
       try {
         console.log('Fetching dashboard data...');
+        console.log('Current API configuration:', {
+          baseURL: window.location.origin,
+          apiPath: '/api/statistics/vacancies',
+          fullUrl: `${window.location.origin}/api/statistics/vacancies`
+        });
         
         // Fetch vacancy statistics - this is more efficient than multiple API calls
-        const statsResponse = await getVacancyStats();
-        console.log('Statistics response:', statsResponse.data);
+        console.log('Making vacancy stats request...');
+        let statsResponse;
+        try {
+          statsResponse = await getVacancyStats();
+          console.log('Vacancy stats request successful');
+        } catch (vacancyError) {
+          console.error('Vacancy stats request failed:', vacancyError);
+          throw new Error(`Vacancy stats request failed: ${vacancyError.message}`);
+        }
+        
+        console.log('Statistics response received:', statsResponse.data);
         
         // Get the statistics from the response
         const vacancyStats = statsResponse.data.statistics || {};
@@ -49,7 +63,22 @@ const Dashboard = () => {
         const newVacanciesCount = vacancyStats.Nieuw || 0;
         
         // Fetch resumes stats
-        const resumesResponse = await getResumes({ limit: 1 });
+        console.log('Making resumes request...');
+        let resumesResponse;
+        try {
+          resumesResponse = await getResumes({ limit: 1 });
+          console.log('Resumes request successful');
+        } catch (resumesError) {
+          console.error('Resumes request failed:', resumesError);
+          throw new Error(`Resumes request failed: ${resumesError.message}`);
+        }
+        
+        console.log('Setting dashboard stats with data:', {
+          totalVacancies: totalAllVacancies,
+          newVacancies: newVacanciesCount,
+          openVacancies: openVacanciesCount,
+          totalResumes: resumesResponse.data.total
+        });
         
         setStats({
           totalVacancies: totalAllVacancies,
@@ -61,10 +90,33 @@ const Dashboard = () => {
         });
       } catch (error) {
         console.error('Error fetching dashboard data:', error);
+        
+        // Create a more detailed error message
+        let errorMessage = 'Failed to load dashboard data. ';
+        
+        if (error.message) {
+          errorMessage += `Error: ${error.message}`;
+        }
+        
+        if (error.response) {
+          // The request was made and the server responded with a status code
+          // that falls out of the range of 2xx
+          errorMessage += ` (Status: ${error.response.status})`;
+          console.error('Server response:', error.response.data);
+        } else if (error.request) {
+          // The request was made but no response was received
+          errorMessage += ' (Network Error: No response received from server)';
+          console.error('Network error - request made but no response');
+          
+          // Add connection diagnostic info
+          console.error('Browser online status:', navigator.onLine ? 'Online' : 'Offline');
+          console.error('Current location:', window.location.href);
+        }
+        
         setStats({
           ...stats,
           loading: false,
-          error: 'Failed to load dashboard data. Please try again later. Error: ' + (error.message || 'Unknown error')
+          error: errorMessage
         });
       }
     };

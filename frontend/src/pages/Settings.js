@@ -14,8 +14,11 @@ import {
   FormControlLabel,
   Switch,
   useTheme,
+  IconButton,
+  Tooltip,
 } from '@mui/material';
 import SaveIcon from '@mui/icons-material/Save';
+import RefreshIcon from '@mui/icons-material/Refresh';
 import Brightness4Icon from '@mui/icons-material/Brightness4';
 import Brightness7Icon from '@mui/icons-material/Brightness7';
 import axios from 'axios';
@@ -45,26 +48,51 @@ const Settings = () => {
     scheduler_end_hour: '20',
     scheduler_interval_minutes: '60',
     scheduler_days: 'mon,tue,wed,thu,fri',
+    // Email settings
+    email_enabled: false,
+    email_provider: 'smtp',
+    email_smtp_host: '',
+    email_smtp_port: '587',
+    email_smtp_use_tls: true,
+    email_username: '',
+    email_password: '',
+    email_from_email: '',
+    email_from_name: '',
+    email_recipients: '',
+    email_digest_subject: '',
   });
   
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [errorMessage, setErrorMessage] = useState('');
   const [success, setSuccess] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
 
+  // Function to fetch settings - extracted so it can be called manually
+  const fetchSettings = async () => {
+    try {
+      setLoading(true);
+      // Add timestamp parameter to prevent caching
+      const timestamp = new Date().getTime();
+      const response = await axios.get(`/api/settings?_=${timestamp}`, {
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        }
+      });
+      console.log('Settings fetched:', response.data);
+      setSettings(response.data);
+      setLoading(false);
+    } catch (err) {
+      console.error('Error fetching settings:', err);
+      setError('Failed to load settings. Please try again later.');
+      setLoading(false);
+    }
+  };
+
+  // Initial fetch on component mount
   useEffect(() => {
-    const fetchSettings = async () => {
-      try {
-        setLoading(true);
-        const response = await axios.get('/api/settings');
-        setSettings(response.data);
-        setLoading(false);
-      } catch (err) {
-        console.error('Error fetching settings:', err);
-        setError('Failed to load settings. Please try again later.');
-        setLoading(false);
-      }
-    };
-
     fetchSettings();
   }, []);
 
@@ -80,12 +108,21 @@ const Settings = () => {
     e.preventDefault();
     try {
       setLoading(true);
-      await axios.put('/api/settings', settings);
+      await axios.put('/api/settings', settings, {
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        }
+      });
       setSuccess(true);
-      setLoading(false);
+      setSuccessMessage("Settings updated successfully!");
+      // Fetch the latest settings after updating
+      await fetchSettings();
     } catch (err) {
       console.error('Error updating settings:', err);
-      setError('Failed to update settings. Please try again later.');
+      setError(true);
+      setErrorMessage(err.response?.data?.detail || 'Failed to update settings. Please try again later.');
       setLoading(false);
     }
   };
@@ -93,13 +130,27 @@ const Settings = () => {
   const handleCloseSnackbar = () => {
     setSuccess(false);
     setError(null);
+    setSuccessMessage('');
+    setErrorMessage('');
   };
 
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-      <Typography variant="h4" component="h1" gutterBottom>
-        Settings
-      </Typography>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+        <Typography variant="h4" component="h1">
+          Settings
+        </Typography>
+        <Tooltip title="Refresh settings">
+          <IconButton 
+            onClick={fetchSettings} 
+            color="primary" 
+            disabled={loading}
+            aria-label="refresh settings"
+          >
+            <RefreshIcon />
+          </IconButton>
+        </Tooltip>
+      </Box>
 
       {loading && (
         <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
@@ -361,8 +412,8 @@ const Settings = () => {
                   value={settings.scheduler_interval_minutes}
                   onChange={handleInputChange}
                   type="number"
-                  inputProps={{ min: 15, step: 15 }}
-                  helperText="Minimum 15 minutes"
+                  inputProps={{ min: 60, step: 60 }}
+                  helperText="Enter in minutes (60 = 1 hour, 300 = 5 hours). Minimum 60 minutes."
                 />
               </Grid>
               
@@ -403,6 +454,208 @@ const Settings = () => {
                 />
               </Grid>
 
+              {/* Email Settings */}
+              <Grid item xs={12} sx={{ mt: 3 }}>
+                <Typography variant="h6" gutterBottom>
+                  Email Notifications
+                </Typography>
+                <Divider />
+              </Grid>
+
+              {/* Email Toggle */}
+              <Grid item xs={12} sm={6} md={4}>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={settings.email_enabled}
+                      onChange={(e) => {
+                        setSettings({
+                          ...settings,
+                          email_enabled: e.target.checked,
+                        });
+                      }}
+                      name="email_enabled"
+                      color="primary"
+                    />
+                  }
+                  label="Enable Email Notifications"
+                />
+              </Grid>
+
+              {/* Email Provider */}
+              <Grid item xs={12} sm={6} md={4}>
+                <TextField
+                  select
+                  fullWidth
+                  label="Email Provider"
+                  name="email_provider"
+                  value={settings.email_provider}
+                  onChange={handleInputChange}
+                  SelectProps={{
+                    native: true,
+                  }}
+                >
+                  <option value="smtp">SMTP</option>
+                  <option value="gmail">Gmail</option>
+                  <option value="mailersend">MailerSend</option>
+                </TextField>
+              </Grid>
+
+              {/* Test Email Button */}
+              <Grid item xs={12} sm={6} md={4}>
+                <Button
+                  variant="outlined"
+                  color="primary"
+                  onClick={() => {
+                    // First show a prompt for the test email recipient
+                    const recipient = prompt("Enter email address for test:", "");
+                    if (recipient) {
+                      axios.post('/api/settings/email/test', { recipient })
+                        .then(response => {
+                          setSuccess(true);
+                          setSuccessMessage("Test email sent successfully!");
+                        })
+                        .catch(error => {
+                          setError(true);
+                          setErrorMessage("Failed to send test email: " + (error.response?.data?.detail || error.message));
+                        });
+                    }
+                  }}
+                  disabled={!settings.email_enabled}
+                  sx={{ mt: 1 }}
+                >
+                  Send Test Email
+                </Button>
+              </Grid>
+
+              {/* SMTP Settings - shown when provider is 'smtp' or 'gmail' */}
+              {(settings.email_provider === 'smtp' || settings.email_provider === 'gmail') && (
+                <>
+                  {/* SMTP Host */}
+                  <Grid item xs={12} sm={6} md={4}>
+                    <TextField
+                      fullWidth
+                      label="SMTP Host"
+                      name="email_smtp_host"
+                      value={settings.email_smtp_host}
+                      onChange={handleInputChange}
+                      disabled={settings.email_provider === 'gmail'}
+                      helperText={settings.email_provider === 'gmail' ? "Using smtp.gmail.com" : ""}
+                    />
+                  </Grid>
+
+                  {/* SMTP Port */}
+                  <Grid item xs={12} sm={6} md={4}>
+                    <TextField
+                      fullWidth
+                      label="SMTP Port"
+                      name="email_smtp_port"
+                      value={settings.email_smtp_port}
+                      onChange={handleInputChange}
+                      type="number"
+                      disabled={settings.email_provider === 'gmail'}
+                      helperText={settings.email_provider === 'gmail' ? "Using port 587" : ""}
+                    />
+                  </Grid>
+
+                  {/* SMTP TLS */}
+                  <Grid item xs={12} sm={6} md={4}>
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={settings.email_smtp_use_tls}
+                          onChange={(e) => {
+                            setSettings({
+                              ...settings,
+                              email_smtp_use_tls: e.target.checked,
+                            });
+                          }}
+                          name="email_smtp_use_tls"
+                          color="primary"
+                          disabled={settings.email_provider === 'gmail'}
+                        />
+                      }
+                      label="Use TLS"
+                    />
+                  </Grid>
+                </>
+              )}
+
+              {/* Email Username */}
+              <Grid item xs={12} sm={6} md={6}>
+                <TextField
+                  fullWidth
+                  label={settings.email_provider === 'mailersend' ? "MailerSend API Key" : "Email Username"}
+                  name="email_username"
+                  value={settings.email_username}
+                  onChange={handleInputChange}
+                  helperText={settings.email_provider === 'mailersend' ? "API Key from MailerSend dashboard" : "Email account username/email"}
+                />
+              </Grid>
+
+              {/* Email Password */}
+              <Grid item xs={12} sm={6} md={6}>
+                <TextField
+                  fullWidth
+                  label="Password"
+                  name="email_password"
+                  value={settings.email_password}
+                  onChange={handleInputChange}
+                  type="password"
+                  autoComplete="current-password"
+                  helperText={settings.email_provider === 'mailersend' ? "Not used for MailerSend (leave empty)" : "Email account password"}
+                  disabled={settings.email_provider === 'mailersend'}
+                />
+              </Grid>
+
+              {/* From Email */}
+              <Grid item xs={12} sm={6} md={6}>
+                <TextField
+                  fullWidth
+                  label="From Email Address"
+                  name="email_from_email"
+                  value={settings.email_from_email}
+                  onChange={handleInputChange}
+                  helperText="Email address shown in the From field"
+                />
+              </Grid>
+
+              {/* From Name */}
+              <Grid item xs={12} sm={6} md={6}>
+                <TextField
+                  fullWidth
+                  label="From Name"
+                  name="email_from_name"
+                  value={settings.email_from_name}
+                  onChange={handleInputChange}
+                  helperText="Display name shown in the From field"
+                />
+              </Grid>
+
+              {/* Recipients */}
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="Recipients"
+                  name="email_recipients"
+                  value={settings.email_recipients}
+                  onChange={handleInputChange}
+                  helperText="Comma-separated list of email addresses to receive notifications"
+                />
+              </Grid>
+
+              {/* Email Subject */}
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="Digest Email Subject"
+                  name="email_digest_subject"
+                  value={settings.email_digest_subject}
+                  onChange={handleInputChange}
+                  helperText="Subject line for digest emails (date will be appended)"
+                />
+              </Grid>
+
               {/* Submit Button */}
               <Grid item xs={12} sx={{ mt: 2 }}>
                 <Button
@@ -429,7 +682,7 @@ const Settings = () => {
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
       >
         <Alert onClose={handleCloseSnackbar} severity="success" sx={{ width: '100%' }}>
-          Settings updated successfully!
+          {successMessage || "Settings updated successfully!"}
         </Alert>
       </Snackbar>
 
@@ -440,7 +693,7 @@ const Settings = () => {
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
       >
         <Alert onClose={handleCloseSnackbar} severity="error" sx={{ width: '100%' }}>
-          {error}
+          {errorMessage || error}
         </Alert>
       </Snackbar>
     </Container>

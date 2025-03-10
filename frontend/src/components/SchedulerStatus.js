@@ -105,7 +105,7 @@ const SchedulerStatus = () => {
                 <strong>Enabled:</strong> {status?.enabled ? 'Yes' : 'No'}
               </Typography>
               <Typography variant="body2">
-                <strong>Schedule:</strong> {status?.active_days?.join(', ')}, {status?.active_hours}, every {status?.interval_minutes} min
+                <strong>Schedule:</strong> {status?.active_days?.join(', ')}, at {status?.scheduled_times?.join(', ')} ({status?.interval_hours} hour intervals)
               </Typography>
               <Typography variant="body2">
                 <strong>Next Run:</strong> {status?.next_run || 'Not scheduled'}

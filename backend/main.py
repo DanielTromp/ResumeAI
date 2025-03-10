@@ -16,6 +16,7 @@ Repository: https://github.com/DanielTromp/ResumeAI
 import os
 import base64
 import secrets
+import time
 from fastapi import FastAPI, Depends, Request, HTTPException, status
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -110,8 +111,8 @@ class BasicAuthMiddleware:
         self.app = app
 
     async def __call__(self, request: Request, call_next):
-        # Skip auth for /docs, /openapi.json and /redoc
-        if request.url.path in ["/docs", "/openapi.json", "/redoc"]:
+        # Skip auth for /docs, /openapi.json, /redoc and /api/health
+        if request.url.path in ["/docs", "/openapi.json", "/redoc", "/api/health"]:
             return await call_next(request)
             
         # Check for Authorization header
@@ -191,6 +192,32 @@ async def root():
         "message": "Welcome to the ResumeAI API",
         "version": "1.0.0",
         "docs_url": "/docs",
+    }
+
+# Health check endpoint - no authentication required
+@app.get("/api/health")
+async def health_check():
+    """
+    Health check endpoint that returns basic application status.
+    This endpoint is available without authentication to check API connectivity.
+    """
+    db_status = "unknown"
+    try:
+        # Basic check if we can get a PostgreSQL connection
+        conn = get_connection()
+        if conn:
+            db_status = "connected"
+            conn.close()
+        else:
+            db_status = "error"
+    except Exception:
+        db_status = "error"
+    
+    return {
+        "status": "healthy",
+        "version": "1.0.0",
+        "database": db_status,
+        "timestamp": time.time(),
     }
 
 if __name__ == "__main__":

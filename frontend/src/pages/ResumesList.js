@@ -29,6 +29,7 @@ import {
   Switch,
   useTheme,
   LinearProgress,
+  Grid,
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
@@ -37,6 +38,7 @@ import DownloadIcon from '@mui/icons-material/Download';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import CloseIcon from '@mui/icons-material/Close';
+import RefreshIcon from '@mui/icons-material/Refresh';
 import axios from 'axios';
 
 const ResumesList = () => {
@@ -63,38 +65,6 @@ const ResumesList = () => {
     severity: 'info'
   });
   
-  // Add useEffect after all declarations
-  useEffect(() => {
-    // Fetch resumes when component mounts or when dependencies change
-    const getResumes = async () => {
-      try {
-        setLoading(true);
-        // Prepare query parameters
-        const params = new URLSearchParams();
-        params.append('skip', page * rowsPerPage);
-        params.append('limit', rowsPerPage);
-        
-        if (searchTerm) {
-          params.append('search', searchTerm);
-        }
-
-        // If showOnlySelected is true, use the selected endpoint
-        const endpoint = showOnlySelected ? '/api/resumes/selected' : '/api/resumes';
-        const response = await axios.get(`${endpoint}?${params.toString()}`);
-        
-        setResumes(response.data.items);
-        setTotalResumes(response.data.total);
-        setLoading(false);
-      } catch (err) {
-        console.error('Error fetching resumes:', err);
-        setError('Failed to load resumes. Please try again later.');
-        setLoading(false);
-      }
-    };
-    
-    getResumes();
-  }, [page, rowsPerPage, showOnlySelected, searchTerm]);
-  
   // Define fetchResumes function for manual refreshes
   const fetchResumes = async () => {
     try {
@@ -107,11 +77,21 @@ const ResumesList = () => {
       if (searchTerm) {
         params.append('search', searchTerm);
       }
+      
+      // Add cache-busting timestamp
+      params.append('_', new Date().getTime());
 
       // If showOnlySelected is true, use the selected endpoint
       const endpoint = showOnlySelected ? '/api/resumes/selected' : '/api/resumes';
-      const response = await axios.get(`${endpoint}?${params.toString()}`);
+      const response = await axios.get(`${endpoint}?${params.toString()}`, {
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        }
+      });
       
+      console.log('Resumes fetched:', response.data);
       setResumes(response.data.items);
       setTotalResumes(response.data.total);
       setLoading(false);
@@ -121,6 +101,12 @@ const ResumesList = () => {
       setLoading(false);
     }
   };
+
+  // Add useEffect after fetchResumes is defined
+  useEffect(() => {
+    fetchResumes();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, rowsPerPage, showOnlySelected, searchTerm]);
 
   const handleChangePage = (event, newPage) => {
     setPage(newPage);
@@ -341,15 +327,58 @@ const ResumesList = () => {
         <Box>
           <Button
             variant="outlined"
+            startIcon={<RefreshIcon />}
+            onClick={fetchResumes}
+            sx={{ mr: 2 }}
+          >
+            Refresh
+          </Button>
+          <Button
+            variant="contained"
             color="primary"
             startIcon={<UploadFileIcon />}
             onClick={handleUploadDialogOpen}
-            sx={{ mr: 2 }}
           >
             Upload Resume
           </Button>
         </Box>
       </Box>
+
+      <Paper sx={{ p: 2, mb: 3 }}>
+        <Grid container spacing={2} alignItems="center">
+          <Grid item xs={12} md={6}>
+            <form onSubmit={handleSearchSubmit}>
+              <TextField
+                fullWidth
+                label="Search resumes"
+                value={searchTerm}
+                onChange={handleSearchChange}
+                InputProps={{
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      <IconButton type="submit" edge="end">
+                        <SearchIcon />
+                      </IconButton>
+                    </InputAdornment>
+                  ),
+                }}
+              />
+            </form>
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={showOnlySelected}
+                  onChange={(e) => setShowOnlySelected(e.target.checked)}
+                  color="primary"
+                />
+              }
+              label="Show only selected resumes"
+            />
+          </Grid>
+        </Grid>
+      </Paper>
 
       {error && (
         <Alert severity="error" sx={{ mb: 3 }}>
@@ -357,139 +386,84 @@ const ResumesList = () => {
         </Alert>
       )}
 
-      <Paper sx={{ p: 2, mb: 3 }}>
-        <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
-          <form onSubmit={handleSearchSubmit} style={{ display: 'flex', flexGrow: 1 }}>
-            <TextField
-              label="Search by name"
-              variant="outlined"
-              size="small"
-              value={searchTerm}
-              onChange={handleSearchChange}
-              sx={{ minWidth: '250px', flexGrow: 1 }}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <SearchIcon />
-                  </InputAdornment>
-                ),
-              }}
-            />
-            <Button 
-              type="submit"
-              variant="contained"
-              sx={{ ml: 1 }}
-            >
-              Search
-            </Button>
-          </form>
-          
-          <FormControlLabel
-            control={
-              <Switch
-                checked={showOnlySelected}
-                onChange={() => setShowOnlySelected(!showOnlySelected)}
-                color="primary"
-              />
-            }
-            label="Show only selected"
-          />
-        </Box>
-      </Paper>
-
-      <TableContainer component={Paper}>
+      <Paper>
         {loading ? (
-          <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
+          <Box sx={{ p: 3, textAlign: 'center' }}>
             <CircularProgress />
           </Box>
         ) : (
           <>
-            <Table>
-              <TableHead>
-                <TableRow>
-                  <TableCell padding="checkbox">
-                    <Tooltip title="Select/Deselect">
-                      <span>Select</span>
-                    </Tooltip>
-                  </TableCell>
-                  <TableCell>Name</TableCell>
-                  <TableCell>Created</TableCell>
-                  <TableCell>Size</TableCell>
-                  <TableCell>Actions</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {resumes.length === 0 ? (
+            <TableContainer>
+              <Table>
+                <TableHead>
                   <TableRow>
-                    <TableCell colSpan={5} align="center">
-                      No resumes found
+                    <TableCell padding="checkbox">
+                      <Tooltip title="Toggle selection">
+                        <span>
+                          <Checkbox disabled />
+                        </span>
+                      </Tooltip>
                     </TableCell>
+                    <TableCell>Name</TableCell>
+                    <TableCell>Date Added</TableCell>
+                    <TableCell>Size</TableCell>
+                    <TableCell align="right">Actions</TableCell>
                   </TableRow>
-                ) : (
-                  resumes.map((resume) => (
-                    <TableRow 
-                      key={resume.id}
-                      sx={{
-                        backgroundColor: resume.file_info?.selected ? 
-                          theme.palette.mode === 'dark' ? 'rgba(0, 100, 0, 0.15)' : 'rgba(200, 255, 200, 0.35)' 
-                          : 'inherit'
-                      }}
-                    >
-                      <TableCell padding="checkbox">
-                        <Checkbox
-                          checked={resume.file_info?.selected || false}
-                          onChange={() => toggleResumeSelection(resume)}
-                          color="primary"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                          <PictureAsPdfIcon color="error" sx={{ mr: 1 }} />
-                          {resume.name}
-                        </Box>
-                      </TableCell>
-                      <TableCell>
-                        {resume.file_info?.created_at 
-                          ? new Date(resume.file_info.created_at).toLocaleDateString() 
-                          : new Date(resume.created_at).toLocaleDateString()}
-                      </TableCell>
-                      <TableCell>
-                        {resume.file_info?.size ? formatFileSize(resume.file_info.size) : 'N/A'}
-                      </TableCell>
-                      <TableCell>
-                        <Tooltip title="View">
-                          <IconButton
-                            onClick={() => handleViewResume(resume)}
-                            size="small"
-                            color="primary"
-                          >
-                            <VisibilityIcon />
-                          </IconButton>
-                        </Tooltip>
-                        <Tooltip title="Download">
-                          <IconButton
-                            onClick={() => handleDownload(resume)}
-                            size="small"
-                            color="primary"
-                          >
-                            <DownloadIcon />
-                          </IconButton>
-                        </Tooltip>
-                        <Tooltip title="Delete">
-                          <IconButton
-                            onClick={() => handleDeleteClick(resume)}
-                            size="small"
-                            color="error"
-                          >
-                            <DeleteIcon />
-                          </IconButton>
-                        </Tooltip>
+                </TableHead>
+                <TableBody>
+                  {resumes.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={5} align="center">
+                        {showOnlySelected
+                          ? "No selected resumes found. Select resumes to see them here."
+                          : "No resumes found. Upload a resume to get started."}
                       </TableCell>
                     </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
+                  ) : (
+                    resumes.map((resume) => (
+                      <TableRow key={resume.name} hover selected={resume.file_info?.selected}>
+                        <TableCell padding="checkbox">
+                          <Checkbox
+                            checked={!!resume.file_info?.selected}
+                            onChange={() => toggleResumeSelection(resume)}
+                            color="primary"
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                            <PictureAsPdfIcon sx={{ mr: 1, color: theme.palette.error.main }} />
+                            {resume.name}
+                          </Box>
+                        </TableCell>
+                        <TableCell>
+                          {new Date(resume.file_info?.creation_time || Date.now()).toLocaleDateString()}
+                        </TableCell>
+                        <TableCell>
+                          {formatFileSize(resume.file_info?.size || 0)}
+                        </TableCell>
+                        <TableCell align="right">
+                          <Tooltip title="View Resume">
+                            <IconButton onClick={() => handleViewResume(resume)}>
+                              <VisibilityIcon />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Download">
+                            <IconButton onClick={() => handleDownload(resume)}>
+                              <DownloadIcon />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Delete">
+                            <IconButton onClick={() => handleDeleteClick(resume)}>
+                              <DeleteIcon />
+                            </IconButton>
+                          </Tooltip>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </TableContainer>
             <TablePagination
               rowsPerPageOptions={[5, 10, 25, 50]}
               component="div"
@@ -501,47 +475,45 @@ const ResumesList = () => {
             />
           </>
         )}
-      </TableContainer>
+      </Paper>
 
       {/* Upload Dialog */}
-      <Dialog open={uploadDialogOpen} onClose={handleUploadDialogClose} maxWidth="sm" fullWidth>
+      <Dialog open={uploadDialogOpen} onClose={handleUploadDialogClose}>
         <DialogTitle>Upload Resume</DialogTitle>
         <DialogContent>
-          <DialogContentText sx={{ mb: 2 }}>
-            Select a PDF file to upload as a resume.
+          <DialogContentText>
+            Select a PDF file to upload as a resume. The filename will be used as the resume name.
           </DialogContentText>
-          
-          <Box sx={{ mb: 2 }}>
+          <Box sx={{ mt: 2 }}>
             <input
+              ref={fileInputRef}
               accept="application/pdf"
               type="file"
-              id="resume-upload"
               onChange={handleFileUpload}
               disabled={uploading}
-              ref={fileInputRef}
               style={{ display: 'none' }}
+              id="resume-file-upload"
             />
-            <label htmlFor="resume-upload">
+            <label htmlFor="resume-file-upload">
               <Button
                 variant="contained"
                 component="span"
                 startIcon={<UploadFileIcon />}
                 disabled={uploading}
+                fullWidth
               >
                 Select PDF File
               </Button>
             </label>
           </Box>
-          
           {uploading && (
-            <Box sx={{ width: '100%', mt: 2 }}>
-              <Typography variant="body2" color="textSecondary" gutterBottom>
+            <Box sx={{ mt: 2 }}>
+              <Typography variant="body2" gutterBottom>
                 Uploading: {uploadProgress}%
               </Typography>
               <LinearProgress variant="determinate" value={uploadProgress} />
             </Box>
           )}
-          
           {uploadSuccess && (
             <Alert severity="success" sx={{ mt: 2 }}>
               Resume uploaded successfully!
@@ -549,109 +521,77 @@ const ResumesList = () => {
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleUploadDialogClose} color="primary">
-            Close
+          <Button onClick={handleUploadDialogClose} disabled={uploading}>
+            Cancel
           </Button>
         </DialogActions>
       </Dialog>
 
       {/* View Resume Dialog */}
-      <Dialog 
-        open={viewDialogOpen} 
-        onClose={handleViewDialogClose} 
-        maxWidth="lg" 
+      <Dialog
+        open={viewDialogOpen}
+        onClose={handleViewDialogClose}
+        maxWidth="lg"
         fullWidth
-        PaperProps={{
-          sx: { 
-            height: '90vh',
-            display: 'flex',
-            flexDirection: 'column'
-          }
-        }}
       >
         <DialogTitle>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Typography variant="h6">
-              {selectedResume?.name}
-            </Typography>
-            <IconButton onClick={handleViewDialogClose} size="small">
-              <CloseIcon />
-            </IconButton>
-          </Box>
+          {selectedResume?.name}
+          <IconButton
+            aria-label="close"
+            onClick={handleViewDialogClose}
+            sx={{
+              position: 'absolute',
+              right: 8,
+              top: 8,
+            }}
+          >
+            <CloseIcon />
+          </IconButton>
         </DialogTitle>
-        <DialogContent sx={{ 
-          flex: 1, 
-          overflow: 'hidden',
-          padding: 0,
-          display: 'flex',
-          flexDirection: 'column'
-        }}>
+        <DialogContent dividers>
           {selectedResume && (
-            <iframe 
-              src={`/api/resumes/download/${encodeURIComponent(selectedResume.file_info?.filename)}#toolbar=0`}
-              title={selectedResume.name}
-              width="100%" 
-              height="100%"
-              style={{ border: 'none', flex: 1 }}
-              onError={(e) => {
-                console.error('Error loading PDF in iframe:', e);
-                showNotification('Error loading PDF preview', 'error');
-              }}
-            />
+            <Box sx={{ height: '80vh' }}>
+              <iframe
+                src={`/api/resumes/download/${encodeURIComponent(selectedResume.file_info.filename)}#toolbar=0`}
+                width="100%"
+                height="100%"
+                title={selectedResume.name}
+                style={{ border: 'none' }}
+              />
+            </Box>
           )}
         </DialogContent>
-        <DialogActions>
-          <Button 
-            onClick={() => selectedResume && handleDownload(selectedResume)} 
-            color="primary"
-            startIcon={<DownloadIcon />}
-          >
-            Download
-          </Button>
-          <Button 
-            onClick={() => selectedResume && toggleResumeSelection(selectedResume)} 
-            color="primary"
-            variant={selectedResume?.file_info?.selected ? "outlined" : "contained"}
-          >
-            {selectedResume?.file_info?.selected ? "Deselect" : "Select"}
-          </Button>
-          <Button onClick={handleViewDialogClose} color="primary">
-            Close
-          </Button>
-        </DialogActions>
       </Dialog>
 
-      {/* Delete confirmation dialog */}
+      {/* Confirm Delete Dialog */}
       <Dialog
         open={confirmDeleteOpen}
         onClose={handleCancelDelete}
       >
-        <DialogTitle>Delete Resume</DialogTitle>
+        <DialogTitle>Confirm Delete</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            Are you sure you want to delete the resume for '{selectedResume?.name}'? This action cannot be undone.
+            Are you sure you want to delete the resume "{selectedResume?.name}"? This action cannot be undone.
           </DialogContentText>
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleCancelDelete} color="primary">
-            Cancel
-          </Button>
-          <Button onClick={handleConfirmDelete} color="error" variant="contained">
+          <Button onClick={handleCancelDelete}>Cancel</Button>
+          <Button onClick={handleConfirmDelete} color="error">
             Delete
           </Button>
         </DialogActions>
       </Dialog>
 
-      {/* Notification snackbar */}
+      {/* Notifications */}
       <Snackbar
         open={notification.open}
-        autoHideDuration={5000}
+        autoHideDuration={6000}
         onClose={handleCloseNotification}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
       >
-        <Alert 
-          onClose={handleCloseNotification} 
-          severity={notification.severity} 
+        <Alert
+          onClose={handleCloseNotification}
+          severity={notification.severity}
           sx={{ width: '100%' }}
         >
           {notification.message}

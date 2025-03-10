@@ -62,8 +62,18 @@ const ProcessRunner = () => {
 
   const fetchProcessStatus = async () => {
     try {
-      const response = await axios.get('/api/process/status');
+      // Add cache busting parameter
+      const timestamp = new Date().getTime();
+      const response = await axios.get(`/api/process/status?_=${timestamp}`, {
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        }
+      });
+      
       const { status, process_id, logs } = response.data;
+      console.log('Process status:', status);
       
       setStatus(status);
       setProcessId(process_id);
@@ -85,7 +95,15 @@ const ProcessRunner = () => {
       setLoading(true);
       setError(null);
       
-      const response = await axios.post('/api/process/start');
+      const response = await axios.post('/api/process/start', {}, {
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        }
+      });
+      
+      console.log('Process start response:', response.data);
       
       if (response.data.status === 'started' || response.data.status === 'running') {
         setRunning(true);
