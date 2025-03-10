@@ -91,8 +91,28 @@ services:
         mkdir -p /backups
         echo "Creating backup..."
         DATE=$$(date +%Y%m%d_%H%M%S)
-        tar -czf /backups/resumeai_backup_$$DATE.tar.gz /backup
-        echo "Backup created at /backups/resumeai_backup_$$DATE.tar.gz"
+        
+        # Create full backup (with exclusions for node_modules)
+        tar -czf /backups/resumeai_backup_$$DATE.tar.gz --exclude="/backup/frontend/node_modules" /backup
+        echo "Full backup created at /backups/resumeai_backup_$$DATE.tar.gz"
+        
+        # Create lightweight backup (for Raspberry Pi and low storage systems)
+        tar -czf /backups/resumeai_backup_$$DATE_light.tar.gz \
+          --exclude="/backup/frontend/node_modules" \
+          --exclude="/backup/frontend/build" \
+          --exclude="/backup/backend/__pycache__" \
+          --exclude="/backup/backend/**/__pycache__" \
+          /backup
+        echo "Lightweight backup created at /backups/resumeai_backup_$$DATE_light.tar.gz"
+        
+        # Calculate sizes
+        FULL_SIZE=$$(du -h /backups/resumeai_backup_$$DATE.tar.gz | cut -f1)
+        LIGHT_SIZE=$$(du -h /backups/resumeai_backup_$$DATE_light.tar.gz | cut -f1)
+        echo "Full backup size: $$FULL_SIZE, Light backup size: $$LIGHT_SIZE"
+        
+        # Clean up old backups (keep last 7 days)
+        find /backups -name "*.tar.gz" -mtime +7 -delete
+        
         echo "Sleeping for 24 hours..."
         sleep 86400
       '

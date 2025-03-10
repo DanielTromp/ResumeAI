@@ -395,7 +395,8 @@ You can restore this backup with:
 
 # Function to restore from a backup
 restore_backup() {
-    if [ -z "$1" ]; then
+    # Check if any arguments were provided
+    if [ $# -eq 0 ]; then
         echo "Error: No backup file specified"
         echo "Usage: ./manage.sh restore <backup_file.tar.gz>"
         exit 1
@@ -884,7 +885,8 @@ case $COMMAND in
         ;;
     restore)
         shift
-        restore_backup "$@"  # Pass all remaining arguments to restore_backup
+        # No need to shift further, just pass the first argument as the backup file
+        restore_backup "$1"  # Pass the first argument (backup file) to restore_backup
         ;;
     init-db)
         if [ "$1" == "--docker" ]; then
