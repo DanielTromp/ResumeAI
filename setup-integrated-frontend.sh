@@ -26,8 +26,23 @@ npm run build
 
 # Copy the build directory to the backend directory
 echo "Copying build files to backend directory..."
-mkdir -p ../backend/frontend
-cp -r build/* ../backend/frontend/
+
+# First try with regular permissions
+if ! mkdir -p ../backend/frontend 2>/dev/null; then
+    echo "Permission issue creating directory. Trying with sudo..."
+    sudo mkdir -p ../backend/frontend
+    sudo chown "$(whoami)" ../backend/frontend
+fi
+
+# Check if we can write to the directory
+if [ -w "../backend/frontend" ]; then
+    echo "Copying files without sudo..."
+    cp -r build/* ../backend/frontend/
+else
+    echo "Permission issue. Using sudo to copy files..."
+    sudo cp -r build/* ../backend/frontend/
+    sudo chown -R "$(whoami)" ../backend/frontend
+fi
 
 cd ..
 
@@ -103,8 +118,23 @@ EOF
 
 echo "Created INTEGRATED-FRONTEND.md with documentation"
 
-echo "All done! To start the integrated application, run:"
-echo "./manage.sh docker-down"
-echo "./manage.sh docker-up"
+echo "====================== IMPORTANT ====================="
+echo "All done! You have two options to run the application:"
+
+echo "OPTION 1: Run with Docker (recommended):"
+echo "  ./manage.sh docker-down"
+echo "  ./manage.sh docker-up"
+echo "  The application will be available at: http://localhost:8008"
 echo ""
-echo "The application will be available at: http://localhost:8008"
+echo "OPTION 2: Run backend directly (for development):"
+echo "  source venv/bin/activate"
+echo "  cd backend && python main.py"
+echo "  The application will be available at: http://localhost:8008"
+echo ""
+echo "NOTE: If you still have issues with Docker networking,"
+echo "you can modify your /etc/hosts file to add:"
+echo "  127.0.0.1 backend"
+echo ""
+echo "To test if the backend can serve the frontend, visit:"
+echo "  http://localhost:8008/"
+echo "======================================================="
