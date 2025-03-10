@@ -1038,7 +1038,7 @@ async def spider_vacatures():
             markdown_data = extract_data_from_html(result.html, db_url)
             
             # Function to parse dates into standard format
-            def parse_date(value: str) -> Optional[str]:
+            def parse_date(value):
                 """Convert a date string to the standard format or return None if invalid."""
                 if not value:
                     return None
