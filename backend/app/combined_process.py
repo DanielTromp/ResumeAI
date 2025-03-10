@@ -1040,6 +1040,8 @@ async def spider_vacatures():
             # Function to parse dates into standard format
             def parse_date(value):
                 """Convert a date string to the standard format or return None if invalid."""
+                import datetime as dt  # Import locally to ensure availability
+                
                 if not value:
                     return None
                 
@@ -1059,7 +1061,7 @@ async def spider_vacatures():
                     
                     for fmt in formats:
                         try:
-                            date_obj = datetime.datetime.strptime(value, fmt)
+                            date_obj = dt.datetime.strptime(value, fmt)
                             # Always return in PostgreSQL-compatible format
                             formatted_date = date_obj.strftime('%Y-%m-%d')
                             logging.info(f"Successfully parsed date '{value}' to '{formatted_date}'")
