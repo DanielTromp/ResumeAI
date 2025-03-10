@@ -13,6 +13,8 @@ show_help() {
     echo "  frontend       Start/restart the frontend service"
     echo "  check          Check the status of running services"
     echo "  backup         Create a backup of the application"
+    echo "      --exclude-node-modules  Exclude node_modules directory (recommended for Raspberry Pi)"
+    echo "      --light                 Create a lightweight backup excluding node_modules, build dirs, etc."
     echo "  restore        Restore from a backup"
     echo "  init-db        Initialize the PostgreSQL database"
     echo "  setup          Setup the application (activate venv, install dependencies)"
@@ -28,7 +30,8 @@ show_help() {
     echo "Examples:"
     echo "  ./manage.sh backend      # Start the backend service locally"
     echo "  ./manage.sh frontend     # Start the frontend service locally"
-    echo "  ./manage.sh backup       # Create a backup"
+    echo "  ./manage.sh backup       # Create a full backup"
+    echo "  ./manage.sh backup --light  # Create a lightweight backup (for Raspberry Pi or low-storage systems)"
     echo "  ./manage.sh restore backups/my_backup.tar.gz  # Restore from backup"
     echo "  ./manage.sh docker-up    # Start all Docker services"
     echo "  ./manage.sh config       # Show current configuration"
@@ -127,13 +130,50 @@ check_services() {
 
 # Function to create a comprehensive backup
 create_backup() {
-    echo "📦 Creating comprehensive backup..."
+    # Parse arguments
+    EXCLUDE_NODE_MODULES=false
+    LIGHT_BACKUP=false
+
+    while [ "$1" != "" ]; do
+        case "$1" in
+            --exclude-node-modules)
+                EXCLUDE_NODE_MODULES=true
+                shift
+                ;;
+            --light)
+                LIGHT_BACKUP=true  # Light backup excludes node_modules, build dirs, and other large files
+                EXCLUDE_NODE_MODULES=true
+                shift
+                ;;
+            *)
+                echo "Unknown option: $1"
+                echo "Usage: ./manage.sh backup [--exclude-node-modules] [--light]"
+                return 1
+                ;;
+        esac
+    done
+
+    echo "📦 Creating backup..."
+    if [ "$EXCLUDE_NODE_MODULES" = true ]; then
+        echo "   📝 Excluding node_modules directories"
+    fi
+    if [ "$LIGHT_BACKUP" = true ]; then
+        echo "   📝 Creating lightweight backup (excluding large files)"
+    fi
 
     # Configuration
     BACKUP_DIR="./backups"
     DATE=$(date +%Y%m%d_%H%M%S)
-    BACKUP_FILE="$BACKUP_DIR/resumeai_backup_$DATE.tar.gz"
-    BACKUP_LOG="$BACKUP_DIR/backup_log_$DATE.txt"
+    BACKUP_SUFFIX=""
+    
+    if [ "$LIGHT_BACKUP" = true ]; then
+        BACKUP_SUFFIX="_light"
+    elif [ "$EXCLUDE_NODE_MODULES" = true ]; then
+        BACKUP_SUFFIX="_no_modules"
+    fi
+    
+    BACKUP_FILE="$BACKUP_DIR/resumeai_backup_$DATE$BACKUP_SUFFIX.tar.gz"
+    BACKUP_LOG="$BACKUP_DIR/backup_log_$DATE$BACKUP_SUFFIX.txt"
 
     # Create backup directory if it doesn't exist
     mkdir -p "$BACKUP_DIR"
@@ -317,7 +357,23 @@ create_backup() {
     
     # Create backup archive
     echo "📦 Creating backup archive..." | tee -a "$BACKUP_LOG"
-    tar -czf "$BACKUP_FILE" -C "$TEMP_DIR" .
+    
+    # Add exclusion options if needed
+    EXCLUDE_OPTS=""
+    if [ "$EXCLUDE_NODE_MODULES" = true ]; then
+        EXCLUDE_OPTS="--exclude=*/node_modules/* --exclude=*/node_modules"
+        echo "📦 Excluding node_modules from backup" | tee -a "$BACKUP_LOG"
+    fi
+    
+    if [ "$LIGHT_BACKUP" = true ]; then
+        # For light backup, exclude additional large directories and files
+        EXCLUDE_OPTS="$EXCLUDE_OPTS --exclude=*/build/* --exclude=*/dist/* --exclude=*/venv/* --exclude=*/.venv/* --exclude=*/__pycache__/* --exclude=*/.git/* --exclude=*.pyc"
+        echo "📦 Creating lightweight backup (excluding large directories)" | tee -a "$BACKUP_LOG"
+    fi
+    
+    # Create tar archive with exclusions
+    # Use eval to properly handle the exclusion options
+    eval "tar -czf \"$BACKUP_FILE\" -C \"$TEMP_DIR\" $EXCLUDE_OPTS ."
     
     # Clean up temporary directory
     rm -rf "$TEMP_DIR"
@@ -361,13 +417,37 @@ restore_backup() {
     echo "Backup file: $BACKUP_FILE" >> "$RESTORE_LOG"
     echo "===============================" >> "$RESTORE_LOG"
 
-    # Create temporary directory
+    # Create temporary directory with explicit permissions
     TEMP_DIR=$(mktemp -d)
+    chmod 755 "$TEMP_DIR"
     echo "📂 Created temporary directory: $TEMP_DIR" >> "$RESTORE_LOG"
+    
+    # Create required directory for log files
+    mkdir -p "./backups"
+    
+    # Check disk space before extracting
+    BACKUP_SIZE=$(du -m "$BACKUP_FILE" | cut -f1)
+    AVAILABLE_SPACE=$(df -m "$TEMP_DIR" | tail -1 | awk '{print $4}')
+    
+    echo "📊 Backup size: ${BACKUP_SIZE}MB, Available space: ${AVAILABLE_SPACE}MB" | tee -a "$RESTORE_LOG"
+    
+    if [ "$AVAILABLE_SPACE" -lt "$((BACKUP_SIZE * 2))" ]; then
+        echo "⚠️ Warning: Low disk space. You should have at least double the backup size available." | tee -a "$RESTORE_LOG"
+        read -p "Continue anyway? (y/n) " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            echo "Restore cancelled" | tee -a "$RESTORE_LOG"
+            rm -rf "$TEMP_DIR"
+            exit 1
+        fi
+    fi
 
-    # Extract backup archive
+    # Extract backup archive with special handling
     echo "📦 Extracting backup archive..." | tee -a "$RESTORE_LOG"
-    tar -xzf "$BACKUP_FILE" -C "$TEMP_DIR"
+    
+    # The --warning=no-unknown-keyword flag ignores Dropbox/macOS xattr messages
+    # The --no-same-owner flag prevents permission issues on different systems
+    tar -xzf "$BACKUP_FILE" -C "$TEMP_DIR" --warning=no-unknown-keyword --no-same-owner
     
     # Check if extraction was successful
     if [ $? -ne 0 ]; then
@@ -799,10 +879,12 @@ case $COMMAND in
         check_services
         ;;
     backup)
-        create_backup
+        shift
+        create_backup "$@"  # Pass all remaining arguments to create_backup
         ;;
     restore)
-        restore_backup "$1"
+        shift
+        restore_backup "$@"  # Pass all remaining arguments to restore_backup
         ;;
     init-db)
         if [ "$1" == "--docker" ]; then
