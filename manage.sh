@@ -395,19 +395,25 @@ You can restore this backup with:
 
 # Function to restore from a backup
 restore_backup() {
+    echo "Debug: restore_backup function called with arguments: '$@'"
+    
     # Check if any arguments were provided
-    if [ $# -eq 0 ]; then
+    if [ $# -eq 0 ] || [ -z "$1" ]; then
         echo "Error: No backup file specified"
         echo "Usage: ./manage.sh restore <backup_file.tar.gz>"
         exit 1
     fi
 
     BACKUP_FILE="$1"
+    echo "Debug: Using backup file: '$BACKUP_FILE'"
     RESTORE_LOG="./backups/restore_log_$(date +%Y%m%d_%H%M%S).txt"
 
     # Check if backup file exists
     if [ ! -f "$BACKUP_FILE" ]; then
-        echo "❌ Error: Backup file $BACKUP_FILE not found"
+        echo "❌ Error: Backup file '$BACKUP_FILE' not found"
+        echo "Debug: Current directory is $(pwd)"
+        echo "Debug: Files in current directory:"
+        ls -l
         exit 1
     fi
 
@@ -865,6 +871,8 @@ fi
 COMMAND=$1
 shift
 
+echo "Debug: Command is '$COMMAND', remaining args: '$@'"
+
 case $COMMAND in
     backend)
         start_backend
@@ -880,12 +888,16 @@ case $COMMAND in
         check_services
         ;;
     backup)
-        shift
         create_backup "$@"  # Pass all remaining arguments to create_backup
         ;;
     restore)
-        shift
-        # No need to shift further, just pass the first argument as the backup file
+        echo "Debug: Restore command received with args: '$@'"
+        # For restore, we need to pass the first argument as the backup file
+        if [ -z "$1" ]; then
+            echo "Error: No backup file specified"
+            echo "Usage: ./manage.sh restore <backup_file.tar.gz>"
+            exit 1
+        fi
         restore_backup "$1"  # Pass the first argument (backup file) to restore_backup
         ;;
     init-db)
