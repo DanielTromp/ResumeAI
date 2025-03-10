@@ -34,22 +34,22 @@ services:
 
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile.dev
+      context: .
+      dockerfile: backend/Dockerfile.dev
     ports:
       - "8008:8008"
     volumes:
       - ./backend:/app
       - backend_data:/app/app/data
       - resume_storage:/app/app/resumes
+    env_file:
+      - ./backend/.env.docker
     environment:
       - PYTHONUNBUFFERED=1
-      - DATABASE_URL=postgresql://postgres:postgres@db:5432/resumeai
-      - PG_HOST=db
-      - PG_PORT=5432
-      - PG_USER=postgres
-      - PG_PASSWORD=postgres
-      - PG_DATABASE=resumeai
+      # Override placeholder values with environment variables from host
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - SPINWEB_USER=${SPINWEB_USER}
+      - SPINWEB_PASS=${SPINWEB_PASS}
     restart: unless-stopped
     command: uvicorn main:app --host 0.0.0.0 --port 8008 --reload
     depends_on:

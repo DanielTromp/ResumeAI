@@ -1,4 +1,4 @@
-# Framework
+# Core Framework
 fastapi>=0.104.0
 uvicorn>=0.23.2
 pydantic>=2.4.2
@@ -7,25 +7,38 @@ python-multipart>=0.0.6
 
 # Database
 psycopg2-binary>=2.9.9
-
-# Web scraping
-beautifulsoup4>=4.12.2
-playwright>=1.39.0
-html2text>=2020.1.16
-Crawl4AI>=0.4.248
-
-# OpenAI
-openai>=1.3.0
-tiktoken>=0.5.1
-
-# Vector storage
 pgvector>=0.2.0
 
+# Web Scraping & Processing
+beautifulsoup4>=4.13.0
+playwright>=1.50.0
+html2text>=2024.2.26
+Crawl4AI>=0.4.248
+lxml
+
+# OpenAI Integration
+openai>=1.3.0
+tiktoken>=0.8.0
+
+# Document Processing
+pypdf>=5.3.0
+PyPDF2>=3.0.1 
+
 # Utilities
-aiohttp>=3.8.6
+aiohttp>=3.11.0
 requests>=2.31.0
-pypdf>=3.16.0
-PyPDF2>=3.0.1
-numpy>=1.26.0
+numpy>=2.2.2
 tqdm>=4.66.1
-schedule>=1.2.0
+rich
+PyYAML
+
+# Email
+# smtplib and email modules are part of the Python standard library
+# requests is already included for MailerSend API
+
+# Scheduling
+schedule>=1.2.0  # Still used in scheduler_service.py
+# pillow  # Image processing library (verify if still needed)
+
+# Note: This is a copy of the main requirements.txt in the project root.
+# For local development, you can use: pip install -r ../requirements.txt

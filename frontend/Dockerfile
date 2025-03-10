@@ -22,7 +22,7 @@ FROM nginx:alpine
 RUN apk add --no-cache openssl
 
 # Copy nginx configuration
-COPY nginx/default.conf /etc/nginx/conf.d/default.conf
+COPY nginx/default.conf /etc/nginx/conf.d/default.conf.template
 COPY nginx/create-htpasswd.sh /docker-entrypoint.d/40-create-htpasswd.sh
 COPY nginx/setup-env.sh /docker-entrypoint.d/30-setup-env.sh
 

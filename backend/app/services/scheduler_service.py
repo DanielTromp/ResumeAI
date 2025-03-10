@@ -44,7 +44,10 @@ class SchedulerService:
         self.enabled = SCHEDULER_ENABLED
         self.start_hour = SCHEDULER_START_HOUR
         self.end_hour = SCHEDULER_END_HOUR
-        self.interval_minutes = max(SCHEDULER_INTERVAL_MINUTES, 15)  # Minimum 15 minutes
+        # Convert interval from minutes to hours
+        # First get the minutes, then convert to hours (integer division)
+        self.interval_minutes = max(SCHEDULER_INTERVAL_MINUTES, 60)  # Minimum 60 minutes (1 hour)
+        self.interval_hours = max(self.interval_minutes // 60, 1)  # Convert to hours, minimum 1 hour
         self.days = SCHEDULER_DAYS
         self.is_running = False
         self.scheduler_thread = None
@@ -62,7 +65,7 @@ class SchedulerService:
         
         logger.info(f"Scheduler initialized with settings: enabled={self.enabled}, "
                    f"hours={self.start_hour}-{self.end_hour}, "
-                   f"interval={self.interval_minutes} minutes, "
+                   f"interval={self.interval_hours} hours ({self.interval_minutes} minutes), "
                    f"days={','.join(self.days)}")
     
     def update_config(self):
@@ -70,12 +73,18 @@ class SchedulerService:
         self.enabled = os.getenv("SCHEDULER_ENABLED", "false").lower() == "true"
         self.start_hour = int(os.getenv("SCHEDULER_START_HOUR", "6"))
         self.end_hour = int(os.getenv("SCHEDULER_END_HOUR", "20"))
-        self.interval_minutes = max(int(os.getenv("SCHEDULER_INTERVAL_MINUTES", "60")), 15)
+        
+        # Handle the interval in hours
+        # First get minutes from the env, then convert to hours
+        raw_minutes = int(os.getenv("SCHEDULER_INTERVAL_MINUTES", "300"))
+        self.interval_minutes = max(raw_minutes, 60)  # Minimum 60 minutes (1 hour)
+        self.interval_hours = max(self.interval_minutes // 60, 1)  # Convert to hours, minimum 1 hour
+        
         self.days = os.getenv("SCHEDULER_DAYS", "mon,tue,wed,thu,fri").lower().split(",")
         
         logger.info(f"Scheduler configuration updated: enabled={self.enabled}, "
                    f"hours={self.start_hour}-{self.end_hour}, "
-                   f"interval={self.interval_minutes} minutes, "
+                   f"interval={self.interval_hours} hours ({self.interval_minutes} minutes), "
                    f"days={','.join(self.days)}")
                    
         # Clear existing jobs and reschedule
@@ -118,27 +127,36 @@ class SchedulerService:
         # Count the total jobs to be scheduled
         total_jobs = 0
         
+        # Calculate fixed time points for the schedule - at specific hours
+        # For example, if start_hour=7, end_hour=17, interval_hours=5,
+        # we'll schedule jobs at 7:00, 12:00, and 17:00
+        scheduled_hours = []
+        for hour in range(self.start_hour, self.end_hour + 1, self.interval_hours):
+            if hour <= self.end_hour:
+                scheduled_hours.append(hour)
+        
+        # Log the actual hours that will be scheduled
+        logger.info(f"Scheduling jobs at these hours: {scheduled_hours}")
+        
         # Schedule jobs for each active day
         for day in self.days:
             if day in self.day_functions:
-                # Use the day function to schedule a job every X minutes during active hours
-                for hour in range(self.start_hour, self.end_hour):
-                    for minute in range(0, 60, self.interval_minutes):
-                        job_time = f"{hour:02d}:{minute:02d}"
-                        # This will actually schedule the job
-                        self.day_functions[day].at(job_time).do(self.run_process)
-                        total_jobs += 1
-                        
-                        # Log only a few sample times for debugging
-                        if total_jobs <= 3:
-                            logger.info(f"Sample scheduled job: {day} at {job_time}")
+                # Schedule jobs at specific hours instead of at intervals
+                for hour in scheduled_hours:
+                    job_time = f"{hour:02d}:00"  # Always use 00 for minutes
+                    # This will actually schedule the job
+                    self.day_functions[day].at(job_time).do(self.run_process)
+                    total_jobs += 1
+                    
+                    # Log all scheduled times since there will be fewer of them
+                    logger.info(f"Scheduled job: {day} at {job_time}")
         
         # Start the scheduler thread
         self.is_running = True
         self.scheduler_thread = Thread(target=self._run_scheduler, daemon=True)
         self.scheduler_thread.start()
         
-        logger.info(f"Scheduler started with {total_jobs} jobs scheduled from {self.start_hour:02d}:00 to {self.end_hour:02d}:00, every {self.interval_minutes} minutes, on {', '.join(self.days)}")
+        logger.info(f"Scheduler started with {total_jobs} jobs scheduled at {len(scheduled_hours)} times per day, every {self.interval_hours} hours, on {', '.join(self.days)}")
         
         # Get and log the next scheduled run time to verify it's correct
         next_run = self.calculate_next_run()
@@ -152,11 +170,11 @@ class SchedulerService:
         current_minute = now.minute
         current_day = now.strftime("%a").lower()
         
-        # Check if this is a time we would normally run
+        # Check if this is a time we would normally run (exact hour match)
         in_active_window = (
-            self.start_hour <= current_hour < self.end_hour and 
+            current_hour in scheduled_hours and 
             current_day in self.days and 
-            current_minute % self.interval_minutes < 5  # Allow a 5-minute window
+            current_minute < 5  # Allow a 5-minute window after the hour
         )
         
         if in_active_window:
@@ -188,6 +206,16 @@ class SchedulerService:
         current_hour = now.hour
         current_minute = now.minute
         
+        # Calculate scheduled hours
+        scheduled_hours = []
+        for hour in range(self.start_hour, self.end_hour + 1, self.interval_hours):
+            if hour <= self.end_hour:
+                scheduled_hours.append(hour)
+                
+        # Return immediately if no hours are scheduled
+        if not scheduled_hours:
+            return None
+        
         # Map day names to their position in the week (0 = Monday)
         day_positions = {
             'mon': 0, 'tue': 1, 'wed': 2, 'thu': 3, 
@@ -213,21 +241,21 @@ class SchedulerService:
             
             # If we're checking today, we need to find a time later than now
             if day_offset == 0:
-                # Find the next hour and minute on today's schedule
-                for hour in range(self.start_hour, self.end_hour):
-                    for minute in range(0, 60, self.interval_minutes):
-                        if hour > current_hour or (hour == current_hour and minute > current_minute):
-                            # This is our next run time today
-                            next_run = datetime.datetime.combine(
-                                check_date,
-                                datetime.time(hour, minute)
-                            )
-                            return next_run
+                # Find the next hour on today's schedule
+                for hour in scheduled_hours:
+                    # Check if this hour is later than current time
+                    if hour > current_hour or (hour == current_hour and current_minute < 5):
+                        # This is our next run time today
+                        next_run = datetime.datetime.combine(
+                            check_date,
+                            datetime.time(hour, 0)  # Always at top of the hour (XX:00)
+                        )
+                        return next_run
             else:
                 # For future days, just return the first scheduled time
                 next_run = datetime.datetime.combine(
                     check_date,
-                    datetime.time(self.start_hour, 0)
+                    datetime.time(scheduled_hours[0], 0)  # First scheduled hour at 00 minutes
                 )
                 return next_run
                 
@@ -239,12 +267,23 @@ class SchedulerService:
         # Use our own calculation for next run instead of relying on schedule.next_run()
         next_run = self.calculate_next_run() if self.is_running and self.enabled else None
         
+        # Calculate scheduled hours
+        scheduled_hours = []
+        for hour in range(self.start_hour, self.end_hour + 1, self.interval_hours):
+            if hour <= self.end_hour:
+                scheduled_hours.append(hour)
+        
+        # Format scheduled hours for display
+        scheduled_times = [f"{hour:02d}:00" for hour in scheduled_hours]
+        
         return {
             "enabled": self.enabled,
             "running": self.is_running,
             "jobs_count": len(schedule.jobs),
             "active_hours": f"{self.start_hour:02d}:00 - {self.end_hour:02d}:00",
             "interval_minutes": self.interval_minutes,
+            "interval_hours": self.interval_hours,
+            "scheduled_times": scheduled_times,  # New field showing the exact scheduled times
             "active_days": self.days,
             "next_run": str(next_run) if next_run else None
         }

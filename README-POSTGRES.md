@@ -2,13 +2,31 @@
 
 This document describes how to set up and use PostgreSQL with pgvector extension for the ResumeAI project.
 
+## Quick Reference
+
+```bash
+# Start PostgreSQL with Docker
+./manage.sh docker-up
+
+# Initialize database
+./manage.sh init-db
+
+# Backup everything (including database)
+./manage.sh backup
+
+# Restore from backup
+./manage.sh restore backups/resumeai_backup_20250310_123456.tar.gz
+```
+
+For complete backup and restore instructions, see [README-BACKUP.md](README-BACKUP.md).
+
 ## Setup Instructions
 
 ### Step 1: Start the Docker containers
 
 ```bash
 # Start all containers (PostgreSQL, backend, frontend)
-docker-compose up -d
+./manage.sh docker-up
 ```
 
 ### Step 2: Initialize the database
@@ -17,7 +35,7 @@ If running for the first time, initialize the database:
 
 ```bash
 # Run the initialization script
-./database/init-db.sh
+./manage.sh init-db
 ```
 
 This script will:

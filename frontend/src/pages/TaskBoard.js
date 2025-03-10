@@ -41,6 +41,7 @@ import DoneIcon from '@mui/icons-material/Done';
 import AssignmentIcon from '@mui/icons-material/Assignment';
 import PriorityHighIcon from '@mui/icons-material/PriorityHigh';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import RefreshIcon from '@mui/icons-material/Refresh';
 import axios from 'axios';
 
 // Task type icons
@@ -143,10 +144,20 @@ const TaskBoard = () => {
       // Build query parameters
       const params = {
         skip: page * rowsPerPage,
-        limit: rowsPerPage
+        limit: rowsPerPage,
+        // Add cache-busting timestamp
+        _: new Date().getTime()
       };
       
-      const response = await axios.get('/api/tasks', { params });
+      const response = await axios.get('/api/tasks', { 
+        params,
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        }
+      });
+      console.log('Tasks fetched:', response.data);
       setTasks(response.data.items);
       setTotalTasks(response.data.total);
       setError(null);

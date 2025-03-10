@@ -5,7 +5,8 @@
 .env
 ResumeAI.code-workspace
 vacancies.csv
-.cache
+.cache/
+/.cache/
 
 ############################
 # Project specific folders #
@@ -16,6 +17,8 @@ old/
 resumes/
 lancedb/
 __pycache__/
+backups/
+debug/
 
 ######################
 # Default .gitignore #

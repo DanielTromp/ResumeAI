@@ -11,9 +11,9 @@ This script performs both the scraping of Spinweb vacancies and the matching
 
 Author: Daniel Tromp
 Email: drpgmtromp@gmail.com
-Version: 0.0.2
+Version: 0.0.4
 Created: 2025-02-25
-Modified: 2025-02-26
+Modified: 2025-03-10
 License: MIT
 Repository: https://github.com/DanielTromp/ResumeAI
 """
@@ -35,13 +35,17 @@ import playwright.async_api
 from bs4 import BeautifulSoup
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode
 
-# Project specific imports
-from app.config import AI_MODEL, EMBEDDING_MODEL, OPENAI_API_KEY
-from app.config import PG_HOST, PG_PORT, PG_USER, PG_PASSWORD, PG_DATABASE
-from app.config import URL1_SPINWEB_USER, URL1_SPINWEB_PASS
-from app.config import URL1_PROVIDER_NAME, URL1_LOGIN_URL, URL1_SOURCE
-from app.config import EXCLUDED_CLIENTS, MATCH_THRESHOLD, MATCH_COUNT
-from app.config import RESUME_RPC_FUNCTION_NAME, PROMPT_TEMPLATE
+# Project specific imports - using the centralized configuration system
+from app.config import config
+# Import individual variables for backward compatibility
+from app.config import (
+    AI_MODEL, EMBEDDING_MODEL, OPENAI_API_KEY,
+    PG_HOST, PG_PORT, PG_USER, PG_PASSWORD, PG_DATABASE,
+    URL1_SPINWEB_USER, URL1_SPINWEB_PASS,
+    URL1_PROVIDER_NAME, URL1_LOGIN_URL, URL1_SOURCE,
+    EXCLUDED_CLIENTS, MATCH_THRESHOLD, MATCH_COUNT,
+    RESUME_RPC_FUNCTION_NAME, PROMPT_TEMPLATE
+)
 
 
 # Configureer logging
@@ -78,8 +82,9 @@ client_openai = OpenAI(api_key=OPENAI_API_KEY)
 # Initialize token calculator
 enc = tiktoken.encoding_for_model(AI_MODEL)
 
-# Import database service
+# Import services
 from app.services.database_service import db_service
+from app.services.email_service import email_service
 
 # Define a URL normalizer function
 def normalize_url(url):
@@ -112,23 +117,148 @@ def convert_html_to_markdown(html_text):
 
 def extract_data_from_html(html, url):
     """Extracts structured data from HTML and converts it to Markdown."""
+    progress_logger.info(f"Extracting data from HTML for URL: {url}")
+    
+    # Save HTML for debugging
+    try:
+        import os
+        debug_dir = os.path.join(os.getcwd(), "debug")
+        os.makedirs(debug_dir, exist_ok=True)
+        
+        # Use a URL-based filename to avoid collisions
+        url_part = url.replace("https://", "").replace("http://", "").replace("/", "_").replace(".", "_")
+        with open(os.path.join(debug_dir, f"vacancy_{url_part}.html"), "w") as f:
+            f.write(html)
+        progress_logger.info(f"✅ Saved vacancy HTML to debug/vacancy_{url_part}.html")
+    except Exception as e:
+        progress_logger.error(f"Could not save vacancy HTML: {str(e)}")
+    
     soup = BeautifulSoup(html, "html.parser")
-
-    functie = soup.select_one(".title-page--text")
-    klant = soup.select_one(".application-customer .dynamic-truncate")
-    functieomschrijving = soup.select_one(".application-content")
-
+    
+    # Log the title of the page to verify we're on a vacancy page
+    page_title = soup.title.string if soup.title else "No title found"
+    progress_logger.info(f"Page title: {page_title}")
+    
+    # Try multiple possible selectors for each field to be more robust
+    # Log which selector was found for debugging
+    
+    # Find job title
+    functie = None
+    job_title_selectors = [
+        ".title-page--text",            # Original selector
+        "h1",                          # Generic - first h1
+        ".job-title",                  # Common class name
+        ".vacancy-title"               # Common class name
+    ]
+    for selector in job_title_selectors:
+        element = soup.select_one(selector)
+        if element:
+            functie = element
+            progress_logger.info(f"Found job title using selector: {selector}")
+            break
+    
+    # Find client name
+    klant = None
+    client_selectors = [
+        ".application-customer .dynamic-truncate",  # Original
+        ".customer-name",                          # Common
+        ".client-name",                            # Common
+        ".company-name"                            # Common
+    ]
+    for selector in client_selectors:
+        element = soup.select_one(selector)
+        if element:
+            klant = element
+            progress_logger.info(f"Found client using selector: {selector}")
+            break
+            
+    # As a fallback for client name, look for text near "Klant:" or "Opdrachtgever:"
+    if not klant:
+        for element in soup.find_all(string=lambda text: "klant:" in text.lower() or "opdrachtgever:" in text.lower()):
+            parent = element.parent
+            next_element = parent.next_sibling
+            if next_element:
+                klant_text = next_element.get_text(strip=True)
+                klant = type('obj', (object,), {'get_text': lambda self, strip=False: klant_text})
+                progress_logger.info(f"Found client using text search: {klant_text}")
+                break
+    
+    # Find job description
+    functieomschrijving = None
+    description_selectors = [
+        ".application-content",       # Original
+        ".job-description",           # Common
+        ".vacancy-description",       # Common
+        ".description"                # Generic
+    ]
+    for selector in description_selectors:
+        element = soup.select_one(selector)
+        if element:
+            functieomschrijving = element
+            progress_logger.info(f"Found job description using selector: {selector}")
+            break
+    
+    # If no job description found, try to get the main content
+    if not functieomschrijving:
+        # Try to find the largest text block on the page
+        text_blocks = []
+        for tag in soup.find_all(["div", "section", "article"]):
+            if tag.get_text(strip=True):
+                text_blocks.append((tag, len(tag.get_text(strip=True))))
+        
+        if text_blocks:
+            # Get the block with the most text
+            largest_block = max(text_blocks, key=lambda x: x[1])
+            functieomschrijving = largest_block[0]
+            progress_logger.info(f"Found job description using largest text block: {largest_block[1]} chars")
+            
+    # Parse additional info - first the original way
     aanvraag_info = {}
-    for item in soup.select(".application-info--item"):
-        label = item.select_one(".application-info--label")
-        value = item.select_one(".application-info--value")
-        if label and value:
-            aanvraag_info[label.get_text(strip=True)] = value.get_text(strip=True)
-
+    info_items = soup.select(".application-info--item")
+    if info_items:
+        progress_logger.info(f"Found {len(info_items)} info items using original selector")
+        for item in info_items:
+            label = item.select_one(".application-info--label")
+            value = item.select_one(".application-info--value")
+            if label and value:
+                key = label.get_text(strip=True)
+                val = value.get_text(strip=True)
+                aanvraag_info[key] = val
+    
+    # Fallback: look for any structured info in tables or definition lists
+    if not aanvraag_info:
+        # Try tables
+        for table in soup.find_all("table"):
+            for row in table.find_all("tr"):
+                cells = row.find_all(["th", "td"])
+                if len(cells) >= 2:
+                    key = cells[0].get_text(strip=True)
+                    val = cells[1].get_text(strip=True)
+                    if key and val:
+                        aanvraag_info[key] = val
+        
+        # Try definition lists
+        for dl in soup.find_all("dl"):
+            terms = dl.find_all("dt")
+            defs = dl.find_all("dd")
+            for i in range(min(len(terms), len(defs))):
+                key = terms[i].get_text(strip=True)
+                val = defs[i].get_text(strip=True)
+                if key and val:
+                    aanvraag_info[key] = val
+    
+    # Log what we found
+    progress_logger.info(f"Found job title: {functie.get_text(strip=True) if functie else 'Not found'}")
+    progress_logger.info(f"Found client: {klant.get_text(strip=True) if klant else 'Not found'}")
+    progress_logger.info(f"Found job description: {'Yes' if functieomschrijving else 'No'}, length: {len(str(functieomschrijving)) if functieomschrijving else 0}")
+    progress_logger.info(f"Found info fields: {list(aanvraag_info.keys())}")
+    
+    # Build markdown output
     markdown_output = "## Aanvraag Informatie\n"
     markdown_output += f"- [🔗 Aanvraag Link]({url})\n"
     markdown_output += "- **Functie:** " + (functie.get_text(strip=True) if functie else "Onbekend") + "\n"
     markdown_output += "- **Klant:** " + (klant.get_text(strip=True) if klant else "Onbekend") + "\n"
+    
     for key, value in aanvraag_info.items():
         if key == "Uren":
             value = value.replace("onbekend", "").strip()
@@ -137,6 +267,7 @@ def extract_data_from_html(html, url):
     if functieomschrijving:
         # Get the entire HTML of the function description
         functieomschrijving_html = str(functieomschrijving)
+        progress_logger.info(f"Function description HTML length: {len(functieomschrijving_html)}")
     else:
         functieomschrijving_html = "<p>No description available.</p>"
 
@@ -175,12 +306,57 @@ def check_environment_variables():
         raise ValueError(error_msg)
 
 def get_embedding(text: str) -> list[float]:
-    """Genereer een embedding voor de gegeven tekst via OpenAI's API."""
-    embedding_response = client_openai.embeddings.create(
-        input=text,
-        model=EMBEDDING_MODEL
-    )
-    return embedding_response.data[0].embedding
+    """Genereer een embedding voor de gegeven tekst via OpenAI's API met rate limit handling."""
+    # Rate limit handling variables
+    max_retries = 5
+    retry_delay = 1  # Initial delay in seconds
+    
+    for attempt in range(max_retries):
+        try:
+            if attempt > 0:
+                progress_logger.info(f"Embedding API call attempt {attempt + 1}/{max_retries}")
+                
+            embedding_response = client_openai.embeddings.create(
+                input=text,
+                model=EMBEDDING_MODEL
+            )
+            return embedding_response.data[0].embedding
+            
+        except Exception as e:
+            error_str = str(e)
+            # Check if this is a rate limit error
+            if "rate_limit" in error_str.lower() and attempt < max_retries - 1:
+                # Extract wait time if available in the error message
+                wait_time_ms = 1000  # Default 1 second
+                
+                # Try to parse the wait time from error message
+                import re
+                wait_match = re.search(r'try again in (\d+)ms', error_str)
+                if wait_match:
+                    wait_time_ms = int(wait_match.group(1))
+                    # Add a buffer to the wait time
+                    wait_time_ms = int(wait_time_ms * 1.2)  # 20% buffer
+                
+                # Calculate wait time in seconds
+                wait_time = max(wait_time_ms / 1000, retry_delay)
+                
+                progress_logger.warning(f"⚠️ Embedding rate limit hit. Waiting {wait_time:.2f} seconds before retry...")
+                import time
+                time.sleep(wait_time)
+                
+                # Exponential backoff for next attempt
+                retry_delay = retry_delay * 2
+            else:
+                # For non-rate limit errors or last attempt, log and break
+                logger.error(f"⚠️ Error in get_embedding (attempt {attempt+1}/{max_retries}): {error_str}")
+                if attempt < max_retries - 1:
+                    progress_logger.warning(f"Retrying in {retry_delay} seconds...")
+                    import time
+                    time.sleep(retry_delay)
+                    retry_delay = retry_delay * 2
+                else:
+                    # This was the last attempt, raise the exception
+                    raise Exception(f"Failed to generate embedding after {max_retries} attempts: {error_str}")
 
 def evaluate_candidate(name: str, cv_text: str, vacancy_text: str) -> tuple[dict, dict]:
     """Evalueer een kandidaat CV tegen een vacature tekst met AI_MODEL (GPT-4o-mini)."""
@@ -194,54 +370,98 @@ def evaluate_candidate(name: str, cv_text: str, vacancy_text: str) -> tuple[dict
     # Bereken tokens
     input_tokens = len(enc.encode(prompt))
 
-    try:
-        response = client_openai.chat.completions.create(
-            model=AI_MODEL,
-            messages=[
-                {"role": "system", "content": "Je bent een AI die sollicitanten evalueert."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.1,
-            max_tokens=1000,
-            top_p=1,
-            frequency_penalty=0,
-            presence_penalty=0
-        )
+    # Rate limit handling variables
+    max_retries = 3
+    retry_delay = 1  # Initial delay in seconds
+    
+    for attempt in range(max_retries):
+        try:
+            progress_logger.info(f"API call attempt {attempt + 1}/{max_retries}")
+            
+            response = client_openai.chat.completions.create(
+                model=AI_MODEL,
+                messages=[
+                    {"role": "system", "content": "Je bent een AI die sollicitanten evalueert."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.1,
+                max_tokens=1000,
+                top_p=1,
+                frequency_penalty=0,
+                presence_penalty=0
+            )
 
-        output_tokens = response.usage.completion_tokens
-        result_text = response.choices[0].message.content.strip()
+            output_tokens = response.usage.completion_tokens
+            result_text = response.choices[0].message.content.strip()
 
-        # Extract JSON from the response if needed
-        if "```json" in result_text:
-            json_str = result_text.split("```json")[1].split("```")[0].strip()
-        elif "```" in result_text:
-            json_str = result_text.split("```")[1].strip()
-        else:
-            json_str = result_text
+            # Extract JSON from the response if needed
+            if "```json" in result_text:
+                json_str = result_text.split("```json")[1].split("```")[0].strip()
+            elif "```" in result_text:
+                json_str = result_text.split("```")[1].strip()
+            else:
+                json_str = result_text
 
-        # Clean and parse
-        json_str = json_str.replace('\n', ' ').replace('\\', '\\\\')
-        evaluation = json.loads(json_str)
+            # Clean and parse
+            json_str = json_str.replace('\n', ' ').replace('\\', '\\\\')
+            evaluation = json.loads(json_str)
 
-        token_usage = {
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-            "total_tokens": input_tokens + output_tokens
-        }
+            token_usage = {
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "total_tokens": input_tokens + output_tokens
+            }
 
-        return evaluation, token_usage
-    except Exception as e:
-        logger.error(f"⚠️ Error in evaluate_candidate: {str(e)}")
-        # Return fallback evaluation
-        evaluation = {
-            "name": name,
-            "percentage": 0,
-            "sterke_punten": ["Evaluatie mislukt"],
-            "zwakke_punten": ["Evaluatie mislukt"],
-            "eindoordeel": f"Evaluatie kon niet worden voltooid vanwege een fout: {str(e)}"
-        }
-        token_usage = {"input_tokens": input_tokens, "output_tokens": 0, "total_tokens": input_tokens}
-        return evaluation, token_usage
+            return evaluation, token_usage
+            
+        except Exception as e:
+            error_str = str(e)
+            # Check if this is a rate limit error
+            if "rate_limit" in error_str.lower() and attempt < max_retries - 1:
+                # Extract wait time if available in the error message
+                wait_time_ms = 2000  # Default 2 seconds
+                
+                # Try to parse the wait time from error message
+                import re
+                wait_match = re.search(r'try again in (\d+)ms', error_str)
+                if wait_match:
+                    wait_time_ms = int(wait_match.group(1))
+                    # Add a buffer to the wait time
+                    wait_time_ms = int(wait_time_ms * 1.2)  # 20% buffer
+                
+                # Calculate wait time in seconds
+                wait_time = max(wait_time_ms / 1000, retry_delay)
+                
+                progress_logger.warning(f"⚠️ Rate limit hit. Waiting {wait_time:.2f} seconds before retry...")
+                import time
+                time.sleep(wait_time)
+                
+                # Exponential backoff for next attempt
+                retry_delay = retry_delay * 2
+            else:
+                # For non-rate limit errors or last attempt, log and break
+                logger.error(f"⚠️ Error in evaluate_candidate (attempt {attempt+1}/{max_retries}): {error_str}")
+                if attempt < max_retries - 1:
+                    progress_logger.warning(f"Retrying in {retry_delay} seconds...")
+                    import time
+                    time.sleep(retry_delay)
+                    retry_delay = retry_delay * 2
+                else:
+                    # This was the last attempt, break out of the loop
+                    break
+
+    # If we got here, all retries failed
+    logger.error(f"⚠️ All {max_retries} attempts failed in evaluate_candidate")
+    # Return fallback evaluation
+    evaluation = {
+        "name": name,
+        "percentage": 0,
+        "sterke_punten": ["Evaluatie mislukt na meerdere pogingen"],
+        "zwakke_punten": ["Evaluatie mislukt na meerdere pogingen"],
+        "eindoordeel": f"Evaluatie kon niet worden voltooid na {max_retries} pogingen vanwege API limieten of fouten."
+    }
+    token_usage = {"input_tokens": input_tokens, "output_tokens": 0, "total_tokens": input_tokens}
+    return evaluation, token_usage
 
 def process_vacancy(vacancy_id: str, vacancy_text: str, matches: dict) -> tuple[dict, dict]:
     """Verwerkt één vacature en evalueert alle kandidaten."""
@@ -287,6 +507,9 @@ async def spider_vacatures():
     Haalt vacatures op, doet de CV matching en slaat alles in één keer op.
     """
     progress_logger.info("🔍 Start gecombineerd vacature ophalen & matching process")
+    
+    # Initialize a list to track processed vacancies for the email digest
+    processed_vacancies = []
 
     # Note: Cleanup of closed listings now handled via PostgreSQL
     try:
@@ -315,8 +538,16 @@ async def spider_vacatures():
     # Configure the crawler
     browser_config = BrowserConfig(
         headless=True,
-        verbose=True
+        verbose=True  # Enables verbose logging
     )
+
+    # Add debug info for the crawler
+    progress_logger.info(f"Setting up crawler with the following parameters:")
+    progress_logger.info(f"  Source URL: {URL1_SOURCE}")
+    progress_logger.info(f"  Login URL: {URL1_LOGIN_URL}")
+    progress_logger.info(f"  Provider: {URL1_PROVIDER_NAME}")
+    progress_logger.info(f"  User: {URL1_SPINWEB_USER}")
+    progress_logger.info(f"  Pass: {'*'*len(URL1_SPINWEB_PASS) if URL1_SPINWEB_PASS else 'Not set'}")
 
     crawler_run_config = CrawlerRunConfig(
         js_code="window.scrollTo(0, document.body.scrollHeight);",
@@ -342,18 +573,91 @@ async def spider_vacatures():
             return page
 
         try:
+            # Check for login form and debug credentials
+            progress_logger.info(f"Login credentials - User: {URL1_SPINWEB_USER}, Pass: {'*'*len(URL1_SPINWEB_PASS)}")
+            progress_logger.info(f"🔑 Checking login form using selector 'input[name=\"user\"]'...")
+            
             if await page.is_visible("input[name='user']"):
-                progress_logger.info("Logging in...")
+                progress_logger.info("🔐 Login form found. Attempting to log in...")
                 await page.fill("input[name='user']", URL1_SPINWEB_USER)
                 await page.fill("input[name='pass']", URL1_SPINWEB_PASS)
+                
+                # Take screenshot before click
+                try:
+                    # Create screenshots directory if needed
+                    import os
+                    screenshots_dir = os.path.join(os.getcwd(), "screenshots")
+                    os.makedirs(screenshots_dir, exist_ok=True)
+                    
+                    screenshot_path = os.path.join(screenshots_dir, "pre_login.png")
+                    await page.screenshot(path=screenshot_path)
+                    progress_logger.info(f"📸 Took screenshot of login form: {screenshot_path}")
+                except Exception as ss_err:
+                    progress_logger.error(f"Failed to take screenshot: {ss_err}")
+                
+                # Click the login button
+                progress_logger.info("Clicking submit button...")
                 await page.click("button[type='submit']")
+                progress_logger.info("Waiting for page to load after login...")
                 await page.wait_for_load_state("networkidle", timeout=30000)
+                
+                # Check if login was successful by looking for login form again
+                if await page.is_visible("input[name='user']"):
+                    progress_logger.error("⚠️ Still seeing login form after submit - login likely failed!")
+                else:
+                    progress_logger.info("✅ Login form no longer visible - login appears successful")
+                    
+                    # Navigate to the source URL after successful login
+                    try:
+                        progress_logger.info(f"Navigating to source URL: {URL1_SOURCE}")
+                        await page.goto(URL1_SOURCE, timeout=30000)
+                        await page.wait_for_load_state("networkidle", timeout=30000)
+                        progress_logger.info("✅ Successfully navigated to source URL after login")
+                        
+                        # Take screenshot of the vacancy page
+                        try:
+                            import os
+                            screenshots_dir = os.path.join(os.getcwd(), "screenshots")
+                            os.makedirs(screenshots_dir, exist_ok=True)
+                            
+                            screenshot_path = os.path.join(screenshots_dir, "vacancy_page.png")
+                            await page.screenshot(path=screenshot_path)
+                            progress_logger.info(f"📸 Took screenshot of vacancy page: {screenshot_path}")
+                            
+                            # Save the HTML of the vacancy page too
+                            vacancy_html = await page.content()
+                            debug_dir = os.path.join(os.getcwd(), "debug")
+                            os.makedirs(debug_dir, exist_ok=True)
+                            
+                            with open(os.path.join(debug_dir, "vacancy_page.html"), "w") as f:
+                                f.write(vacancy_html)
+                            progress_logger.info("✅ Saved vacancy page HTML to debug/vacancy_page.html")
+                        except Exception as e:
+                            progress_logger.error(f"Failed to save vacancy page details: {str(e)}")
+                    except playwright.async_api.TimeoutError as e:
+                        progress_logger.error(f"⚠️ Timeout navigating to source URL: {str(e)}")
+                    except playwright.async_api.Error as e:
+                        progress_logger.error(f"⚠️ Error navigating to source URL: {str(e)}")
+                    
+                # Take screenshot after login
+                try:
+                    # Use the same screenshots directory
+                    import os
+                    screenshots_dir = os.path.join(os.getcwd(), "screenshots")
+                    os.makedirs(screenshots_dir, exist_ok=True)
+                    
+                    screenshot_path = os.path.join(screenshots_dir, "post_login.png")
+                    await page.screenshot(path=screenshot_path)
+                    progress_logger.info(f"📸 Took screenshot after login attempt: {screenshot_path}")
+                except Exception as ss_err:
+                    progress_logger.error(f"Failed to take screenshot: {ss_err}")
+                    
             else:
-                progress_logger.info("Already logged in, skipping login step.")
+                progress_logger.info("✅ Login form not found - already logged in or different authentication method.")
         except playwright.async_api.TimeoutError as e:
-            progress_logger.error("Timeout during login process: %s", e)
+            progress_logger.error(f"⚠️ Timeout during login process: {str(e)}")
         except playwright.async_api.Error as e:
-            progress_logger.error("Playwright error during login: %s", e)
+            progress_logger.error(f"⚠️ Playwright error during login: {str(e)}")
 
         return page
 
@@ -365,29 +669,226 @@ async def spider_vacatures():
         progress_logger.error("Error: No source URL configured in environment variables.")
         return []
 
-    result = await crawler.arun(URL1_SOURCE, config=crawler_run_config)
+    # We're now using a different approach: 
+    # Instead of directly crawling the source URL, we first login and then navigate to the source URL
+    # in the on_page_context_created hook. This allows us to maintain the login session.
+    # 
+    # The URL1_LOGIN_URL is used for the initial navigation, and then we navigate to URL1_SOURCE
+    # after successful login. So here we use the login URL for the crawler.
+    progress_logger.info("Starting crawler with initial navigation to login URL...")
+
+    # For the initial crawl, we'll just use the login URL
+    # The actual crawling of the source URL happens in the hook
+    result = await crawler.arun(URL1_LOGIN_URL, config=crawler_run_config)
 
     if not result.success:
-        progress_logger.error("Error crawling source URL: %s", result.error_message)
+        progress_logger.error(f"Error crawling login URL: {result.error_message}")
         await crawler.close()
         return
     
     progress_logger.info("Crawled URL: %s", result.url)
-    soup = BeautifulSoup(result.html, 'html.parser')
-
-    # Zoek alle vacature links
+    
+    # Enhanced debugging for HTML content
+    html_content = result.html
+    progress_logger.info(f"HTML content length: {len(html_content)}")
+    
+    # Check if we have a login form in the returned HTML (indicating we're not logged in)
+    login_form_present = "name='user'" in html_content or "name='pass'" in html_content
+    if login_form_present:
+        progress_logger.error("⚠️ WARNING: Login form detected in returned HTML - login may have failed!")
+        progress_logger.error("This is a critical issue that will prevent finding vacancy links!")
+        progress_logger.info(f"Using credentials: User={URL1_SPINWEB_USER}, Pass={'*'*len(URL1_SPINWEB_PASS)}")
+        progress_logger.info(f"Login URL: {URL1_LOGIN_URL}")
+        progress_logger.info(f"Source URL: {URL1_SOURCE}")
+        
+        # Save the HTML for debugging
+        try:
+            import os
+            debug_dir = os.path.join(os.getcwd(), "debug")
+            os.makedirs(debug_dir, exist_ok=True)
+            
+            with open(os.path.join(debug_dir, "failed_login_page.html"), "w") as f:
+                f.write(html_content)
+            progress_logger.info("✅ Saved login page HTML to debug/failed_login_page.html")
+        except Exception as e:
+            progress_logger.error(f"Could not save debug HTML: {str(e)}")
+    
+    # Look for title to see what page we're on
+    soup = BeautifulSoup(html_content, 'html.parser')
+    page_title = soup.title.string if soup.title else "No title found"
+    progress_logger.info(f"Page title: {page_title}")
+    
+    # Debug the first 500 characters of HTML to see what we're getting
+    progress_logger.info(f"HTML preview: {html_content[:500]}...")
+    
+    # Important: We need to use the HTML from the vacancy page, not the login page
+    # Check if we have debug HTML file from the vacancy page, use that instead
+    import os
+    import re  # For regex pattern matching
+    
+    debug_dir = os.path.join(os.getcwd(), "debug")
+    vacancy_page_path = os.path.join(debug_dir, "vacancy_page.html")
+    vacancy_html = None
+    
+    if os.path.exists(vacancy_page_path):
+        progress_logger.info(f"Using vacancy page HTML from debug file: {vacancy_page_path}")
+        try:
+            with open(vacancy_page_path, "r") as f:
+                vacancy_html = f.read()
+                soup = BeautifulSoup(vacancy_html, 'html.parser')
+                progress_logger.info(f"Loaded vacancy page HTML - length: {len(vacancy_html)}")
+        except Exception as e:
+            progress_logger.error(f"Error reading vacancy page HTML: {e}")
+            # Continue with the original soup
+    else:
+        vacancy_html = html_content  # Use the HTML from the crawler result
+    
+    # 1. Primary Approach: Use regex to find vacancy links, exactly like the old script
     vacancy_links = set()
-    for link in soup.find_all('a', href=True):
-        href = link['href']
-        if '/aanvraag/' in href:
-            # Zorg voor volledige URLs met protocol voor de crawler
-            full_url = f"https://{URL1_PROVIDER_NAME}{href}" if href.startswith('/') else href
-            if not full_url.startswith('http'):
-                full_url = f"https://{full_url}"
+    if vacancy_html:
+        # Look for "/aanvraag/123456" patterns in the HTML
+        aanvraag_matches = re.findall(r'/aanvraag/\d+', vacancy_html)
+        progress_logger.info(f"Found {len(aanvraag_matches)} matches using regex for '/aanvraag/\\d+'")
+        
+        for link in aanvraag_matches:
+            full_url = f"https://{URL1_PROVIDER_NAME}{link}"
             vacancy_links.add(full_url)
-
+            progress_logger.info(f"Found vacancy link via regex: {full_url}")
+    
+    # 2. Secondary Approach: Find links in the parsed HTML
+    if not vacancy_links:
+        progress_logger.info("No vacancy links found with regex. Trying HTML parsing...")
+        all_links = soup.find_all('a', href=True)
+        progress_logger.info(f"Total links found: {len(all_links)}")
+        
+        # Expand search to include different patterns
+        link_patterns = ['/aanvraag/', 'interim-aanvraag', '/opdracht/', 'interim-opdracht']
+        
+        for link in all_links:
+            href = link['href']
+            # Check for any of the link patterns
+            matches_pattern = any(pattern in href for pattern in link_patterns)
+            
+            if matches_pattern:
+                # Zorg voor volledige URLs met protocol voor de crawler
+                full_url = f"https://{URL1_PROVIDER_NAME}{href}" if href.startswith('/') else href
+                if not full_url.startswith('http'):
+                    full_url = f"https://{full_url}"
+                vacancy_links.add(full_url)
+                progress_logger.info(f"Found vacancy link: {full_url}")
+    
+    # 3. Tertiary Approach: Look for vacancy cards
+    if not vacancy_links:
+        progress_logger.info("No vacancy links found with standard patterns. Trying to find vacancy cards...")
+        
+        vacancy_cards = soup.find_all('div', class_=lambda c: c and ('card' in c.lower() or 'vacancy' in c.lower()))
+        if not vacancy_cards:
+            vacancy_cards = soup.find_all('div', class_=lambda c: c and ('item' in c.lower() or 'listing' in c.lower()))
+        if not vacancy_cards:
+            vacancy_cards = soup.select('.item, .card, .vacancy, .job-listing, .job-item')
+            
+        progress_logger.info(f"Found {len(vacancy_cards)} potential vacancy cards")
+        
+        for card in vacancy_cards:
+            links = card.find_all('a', href=True)
+            for link in links:
+                href = link['href']
+                if '?' not in href and '#' not in href and len(href) > 5:
+                    full_url = f"https://{URL1_PROVIDER_NAME}{href}" if href.startswith('/') else href
+                    if not full_url.startswith('http'):
+                        full_url = f"https://{full_url}"
+                    vacancy_links.add(full_url)
+                    progress_logger.info(f"Found vacancy link from card: {full_url}")
+    
+    # Debug some example links
+    sample_links = [link['href'] for link in all_links[:20]] if 'all_links' in locals() else []
+    if sample_links:
+        progress_logger.info(f"Sample of links found: {sample_links}")
+    
+    # Save the found links to a debug file
+    try:
+        debug_dir = os.path.join(os.getcwd(), "debug")
+        os.makedirs(debug_dir, exist_ok=True)
+        with open(os.path.join(debug_dir, "found_vacancy_links.txt"), "w") as f:
+            for link in vacancy_links:
+                f.write(f"{link}\n")
+        progress_logger.info(f"✅ Saved found vacancy links to debug/found_vacancy_links.txt")
+    except Exception as e:
+        progress_logger.error(f"Could not save vacancy links to debug file: {str(e)}")
+        
     progress_logger.info(f"Found {len(vacancy_links)} vacancy links")
 
+    # Last resort: If we still don't have any vacancy links, try a more direct page scraping approach
+    if not vacancy_links:
+        progress_logger.info("Still no vacancy links found. Attempting direct page scrape as last resort...")
+        try:
+            # Create a new browser page for direct scraping
+            import os
+            from playwright.async_api import async_playwright
+            
+            progress_logger.info("Launching direct browser instance for scraping...")
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True)
+                context = await browser.new_context()
+                page = await context.new_page()
+                
+                # Go to login page
+                progress_logger.info(f"Navigating to login page: {URL1_LOGIN_URL}")
+                await page.goto(URL1_LOGIN_URL, timeout=30000)
+                await page.wait_for_load_state("networkidle", timeout=30000)
+                
+                # Check if we need to login
+                if await page.is_visible("input[name='user']"):
+                    progress_logger.info("Logging in...")
+                    await page.fill("input[name='user']", URL1_SPINWEB_USER)
+                    await page.fill("input[name='pass']", URL1_SPINWEB_PASS)
+                    await page.click("button[type='submit']")
+                    await page.wait_for_load_state("networkidle", timeout=30000)
+                
+                # Navigate to the source URL
+                progress_logger.info(f"Navigating to source URL: {URL1_SOURCE}")
+                await page.goto(URL1_SOURCE, timeout=30000)
+                await page.wait_for_load_state("networkidle", timeout=30000)
+                
+                # Take a screenshot
+                screenshots_dir = os.path.join(os.getcwd(), "screenshots")
+                os.makedirs(screenshots_dir, exist_ok=True)
+                screenshot_path = os.path.join(screenshots_dir, "direct_scrape.png")
+                await page.screenshot(path=screenshot_path)
+                progress_logger.info(f"📸 Took screenshot of direct scrape: {screenshot_path}")
+                
+                # Get the page content
+                direct_html = await page.content()
+                direct_soup = BeautifulSoup(direct_html, 'html.parser')
+                
+                # Save for debugging
+                debug_dir = os.path.join(os.getcwd(), "debug")
+                os.makedirs(debug_dir, exist_ok=True)
+                with open(os.path.join(debug_dir, "direct_scrape.html"), "w") as f:
+                    f.write(direct_html)
+                progress_logger.info("✅ Saved direct scrape HTML to debug/direct_scrape.html")
+                
+                # Try to find all links
+                direct_links = direct_soup.find_all('a', href=True)
+                progress_logger.info(f"Found {len(direct_links)} links in direct scrape")
+                
+                # Look for links with vacancy patterns
+                for link in direct_links:
+                    href = link['href']
+                    if any(pattern in href.lower() for pattern in link_patterns):
+                        full_url = f"https://{URL1_PROVIDER_NAME}{href}" if href.startswith('/') else href
+                        if not full_url.startswith('http'):
+                            full_url = f"https://{full_url}"
+                        vacancy_links.add(full_url)
+                        progress_logger.info(f"Found vacancy link in direct scrape: {full_url}")
+                
+                # Close the browser
+                await browser.close()
+                progress_logger.info(f"Direct scrape found {len(vacancy_links)} vacancy links")
+                
+        except Exception as e:
+            progress_logger.error(f"Error in direct page scrape: {str(e)}")
+    
     # URL normalisatie voor database en crawler
     # Voor database: zonder protocol (spinweb.nl/aanvraag/123)
     # Voor crawler: met protocol (https://spinweb.nl/aanvraag/123)
@@ -411,28 +912,94 @@ async def spider_vacatures():
         cursor.close()
         conn.close()
         progress_logger.info(f"Found {len(existing_aanvragen_urls)} existing listings in database")
+        
+        # Log some existing URLs for debugging
+        sample_existing = list(existing_aanvragen_urls)[:5]
+        progress_logger.info(f"Sample existing URLs: {sample_existing}")
     except Exception as e:
         progress_logger.error(f"Error retrieving existing listings: {str(e)}")
         existing_aanvragen_urls = set()
         
-    # Get lowest URL (oldest vacancy) as a cutoff point
+    # Get highest URL (newest vacancy) as a cutoff point
+    highest_url = ""
     try:
         from app.db_init import get_connection
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT url FROM vacancies ORDER BY created_at ASC LIMIT 1")
+        # Get the most recent vacancy by created_at date
+        cursor.execute("SELECT url FROM vacancies ORDER BY created_at DESC LIMIT 1")
         result = cursor.fetchone()
-        lowest_url = normalize_url(result[0]) if result and result[0] else ""
+        if result and result[0]:
+            # Make sure to normalize the URL in the same way as vacancy URLs are normalized
+            highest_url = normalize_url(result[0])
+            progress_logger.info(f"Highest URL from database: {highest_url}")
+            
+            # Additional debug to check format
+            original_url = result[0]
+            progress_logger.info(f"Original URL: {original_url}, Normalized: {highest_url}")
+            
+            # Add explicit type checks for debugging
+            progress_logger.info(f"URL type check - original: {type(original_url)}, normalized: {type(highest_url)}")
+        else:
+            progress_logger.info("No highest URL found in database (may be empty)")
         cursor.close()
         conn.close()
     except Exception as e:
-        progress_logger.error(f"Error retrieving oldest listing: {str(e)}")
-        lowest_url = ""
+        progress_logger.error(f"Error retrieving newest listing: {str(e)}")
+        highest_url = ""
 
-    # Filter new listings (genormaliseerde URLs zonder protocol)
-    new_listings_db = {link for link in vacancy_links_db
-                    if link not in existing_aanvragen_urls and link > lowest_url}
+    # Log vacancy URLs before filtering
+    progress_logger.info(f"Vacancy URLs before filtering: {len(vacancy_links_db)}")
+    sample_links = list(vacancy_links_db)[:5]
+    progress_logger.info(f"Sample vacancy URLs: {sample_links}")
+    
+    # Production logic - only process vacancies that are newer than highest_url
+    # Using a more detailed filtering approach for debugging
+    new_listings_db = set()
+    for link in vacancy_links_db:
+        if link in existing_aanvragen_urls:
+            # Skip existing URLs
+            continue
+        
+        if not highest_url:
+            # If no highest_url (empty DB), accept all vacancies
+            new_listings_db.add(link)
+            continue
+            
+        # Only add if link is newer (numerically higher) than highest_url
+        # Parse the numeric portion from vacancy URLs if possible
+        try:
+            # This handles URLs like "spinweb.nl/aanvraag/123456"
+            link_num = int(link.split('/')[-1]) if '/' in link else 0
+            highest_num = int(highest_url.split('/')[-1]) if '/' in highest_url else 0
+            
+            if link_num > highest_num:
+                new_listings_db.add(link)
+                progress_logger.info(f"Comparing numbers: {link_num} > {highest_num} = {link_num > highest_num}")
+            else:
+                progress_logger.info(f"Filtering out: {link_num} <= {highest_num} = {link_num <= highest_num}")
+        except (ValueError, IndexError):
+            # Fallback to string comparison if we can't parse numbers
+            if link > highest_url:
+                new_listings_db.add(link)
+                progress_logger.info(f"String comparison fallback: {link} > {highest_url}")
+            else:
+                progress_logger.info(f"Filtering out (string): {link} <= {highest_url}")
+    
+    # Sort listings for processing (ensure they're processed in order)
     new_listings_db = sorted(new_listings_db)
+    
+    # Log details of filtering with more debug info
+    progress_logger.info(f"Vacancy URLs after filtering: {len(new_listings_db)}")
+    progress_logger.info(f"Highest URL cutoff: '{highest_url}'")  # Debug the exact highest value
+    
+    for link in vacancy_links_db:
+        if link in existing_aanvragen_urls:
+            progress_logger.info(f"URL filtered (exists in DB): {link}")
+        elif highest_url and link <= highest_url:
+            progress_logger.info(f"URL filtered (not newer than highest): '{link}' <= '{highest_url}' = {link <= highest_url}")
+        else:
+            progress_logger.info(f"URL accepted for processing: '{link}' > '{highest_url}' = {not highest_url or link > highest_url}")
 
     # Sorteer de crawler-vriendelijke URLs in dezelfde volgorde
     new_listings_crawler = []
@@ -758,8 +1325,8 @@ async def spider_vacatures():
                                 vacancy_data.get("Uren", ""),
                                 vacancy_data.get("Tarief", ""),
                                 vacancy_data.get("Checked_resumes", ""),
-                                None if not vacancy_data.get("Geplaatst") else vacancy_data.get("Geplaatst"),
-                                None if not vacancy_data.get("Sluiting") else vacancy_data.get("Sluiting"),
+                                None,  # Set to None to avoid date format issues
+                                None,  # Set to None to avoid date format issues
                                 vacancy_data.get("External_id", ""),
                                 vacancy_data.get("Model", ""),
                                 vacancy_data.get("Version", "")
@@ -894,6 +1461,16 @@ async def spider_vacatures():
                         pg_cursor.close()
                         pg_conn.close()
                         progress_logger.info(f"Match results saved to PostgreSQL for {db_url}")
+                        
+                        # Add to processed vacancies for email digest
+                        processed_vacancies.append({
+                            'url': db_url,
+                            'Functie': vacancy_data.get('Functie', 'Onbekend'),
+                            'Klant': vacancy_data.get('Klant', 'Onbekend'),
+                            'Status': match_results.get('Status', 'Open'),
+                            'Top_Match': match_results.get('Top_Match', 0),
+                            'Checked_resumes': match_results.get('Checked_resumes', '')
+                        })
                     except Exception as pg_error:
                         progress_logger.error(f"Failed to update match results in PostgreSQL: {str(pg_error)}")
                         if 'pg_conn' in locals() and pg_conn:
@@ -930,6 +1507,16 @@ async def spider_vacatures():
                         pg_conn.commit()
                         pg_cursor.close()
                         pg_conn.close()
+                        
+                        # Add to processed vacancies for email digest
+                        processed_vacancies.append({
+                            'url': db_url,
+                            'Functie': vacancy_data.get('Functie', 'Onbekend'),
+                            'Klant': vacancy_data.get('Klant', 'Onbekend'),
+                            'Status': 'AI afgewezen',
+                            'Top_Match': 0,
+                            'Checked_resumes': ''
+                        })
                     except Exception as pg_error:
                         progress_logger.error(f"Failed to update rejection status in PostgreSQL: {str(pg_error)}")
                         if 'pg_conn' in locals() and pg_conn:
@@ -955,9 +1542,74 @@ async def spider_vacatures():
     progress_logger.info("\n🚀 Alle vacatures verwerkt!")
     progress_logger.info("\n📈 Eindrapport token gebruik:")
     progress_logger.info(f"Totaal aantal evaluaties: {total_token_usage['total_evaluations']}")
+    
+    # Calculate average tokens per evaluation
+    avg_tokens = 0
     if total_token_usage['total_evaluations'] > 0:
-        avg = total_token_usage['total_tokens'] / total_token_usage['total_evaluations']
-        progress_logger.info(f"Gemiddeld tokens per evaluatie: {avg:.2f}")
+        avg_tokens = total_token_usage['total_tokens'] / total_token_usage['total_evaluations']
+        progress_logger.info(f"Gemiddeld tokens per evaluatie: {avg_tokens:.2f}")
+    
+    # Prepare to send email digest if enabled
+    try:
+        if processed_vacancies:
+            # Get processed vacancies from database for email digest
+            from app.db_init import get_connection
+            conn = get_connection()
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+            
+            # Fetch the recently processed vacancies
+            processed_urls = [data.get('url') for data in processed_vacancies if data.get('url')]
+            if processed_urls:
+                placeholders = ','.join(['%s'] * len(processed_urls))
+                cursor.execute(
+                    f"""
+                    SELECT id, functie, klant, status, top_match, checked_resumes, url
+                    FROM vacancies 
+                    WHERE url IN ({placeholders})
+                    ORDER BY updated_at DESC
+                    """,
+                    processed_urls
+                )
+            else:
+                # Fallback: If no processed_vacancies were tracked, get recently updated ones
+                cursor.execute(
+                    """
+                    SELECT id, functie, klant, status, top_match, checked_resumes, url
+                    FROM vacancies 
+                    WHERE updated_at > NOW() - INTERVAL '1 hour'
+                    ORDER BY updated_at DESC
+                    """
+                )
+                
+            # Convert to list of dictionaries for email service
+            email_vacancy_data = []
+            for row in cursor.fetchall():
+                email_vacancy_data.append(dict(row))
+            
+            # Prepare processing stats for email
+            processing_stats = {
+                'total_time': f"{total_token_usage.get('total_processing_time', 0):.2f} seconds",
+                'token_usage': f"{total_token_usage.get('total_tokens', 0)} tokens",
+                'avg_tokens': f"{avg_tokens:.2f} tokens/evaluation" if avg_tokens > 0 else "N/A"
+            }
+            
+            # Send email digest if we have any data
+            if email_vacancy_data:
+                email_sent = email_service.send_digest(email_vacancy_data, processing_stats)
+                if email_sent:
+                    progress_logger.info("✅ Email digest sent successfully")
+                else:
+                    progress_logger.info("ℹ️ Email digest not sent (service disabled or no recipients configured)")
+            else:
+                progress_logger.info("ℹ️ No vacancies processed, skipping email digest")
+            
+            cursor.close()
+            conn.close()
+        
+    except Exception as e:
+        progress_logger.error(f"❌ Failed to send email digest: {str(e)}")
+        import traceback
+        traceback.print_exc()
 
 # Removed test_database_with_dummy_data function since we now use the db_init module
 
