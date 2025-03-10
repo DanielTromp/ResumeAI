@@ -3,7 +3,7 @@ version: '3'
 services:
   db:
     image: ankane/pgvector:latest
-#    ports:
+    ports:
       - "5432:5432"
     environment:
       - POSTGRES_USER=postgres
@@ -22,7 +22,7 @@ services:
       
   pgadmin:
     image: dpage/pgadmin4
-#    ports:
+    ports:
       - "8080:80"
     environment:
       - PGADMIN_DEFAULT_EMAIL=admin@resumeai.com
@@ -31,14 +31,14 @@ services:
     volumes:
       - pgadmin_data:/var/lib/pgadmin
 #    restart: unless-stopped
-#    depends_on:
+    depends_on:
       - db
 
   backend:
-#    build:
+    build:
       context: .
       dockerfile: backend/Dockerfile.dev
-#    ports:
+    ports:
       - "8008:8008"
     volumes:
       - ./backend:/app
@@ -56,7 +56,7 @@ services:
       - TZ=Europe/Amsterdam
 #    restart: unless-stopped
     command: uvicorn main:app --host 0.0.0.0 --port 8008 --reload
-#    depends_on:
+    depends_on:
       db:
         condition: service_healthy
 
