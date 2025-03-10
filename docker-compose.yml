@@ -3,16 +3,16 @@ version: '3'
 services:
   db:
     image: ankane/pgvector:latest
-    ports:
+#    ports:
       - "5432:5432"
-    environment:
+#    environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
       - POSTGRES_DB=resumeai
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./database/init:/docker-entrypoint-initdb.d
-    restart: unless-stopped
+#    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -21,66 +21,66 @@ services:
       
   pgadmin:
     image: dpage/pgadmin4
-    ports:
+#    ports:
       - "8080:80"
-    environment:
+#    environment:
       - PGADMIN_DEFAULT_EMAIL=admin@resumeai.com
       - PGADMIN_DEFAULT_PASSWORD=admin
     volumes:
       - pgadmin_data:/var/lib/pgadmin
-    restart: unless-stopped
-    depends_on:
+#    restart: unless-stopped
+#    depends_on:
       - db
 
   backend:
-    build:
+#    build:
       context: .
       dockerfile: backend/Dockerfile.dev
-    ports:
+#    ports:
       - "8008:8008"
     volumes:
       - ./backend:/app
       - ./frontend/build:/app/frontend
-      - backend_data:/app/app/data
+#      - backend_data:/app/app/data
       - resume_storage:/app/app/resumes
     env_file:
       - ./backend/.env.docker
-    environment:
+#    environment:
       - PYTHONUNBUFFERED=1
       # Override placeholder values with environment variables from host
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - SPINWEB_USER=${SPINWEB_USER}
       - SPINWEB_PASS=${SPINWEB_PASS}
-    restart: unless-stopped
+#    restart: unless-stopped
     command: uvicorn main:app --host 0.0.0.0 --port 8008 --reload
-    depends_on:
+#    depends_on:
       db:
         condition: service_healthy
 
 # Frontend with authentication
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    ports:
-      - "3000:80"
-    environment:
-      - AUTH_USERNAME=admin
-      - AUTH_PASSWORD=resumeai
-      - BACKEND_URL=http://localhost:8008
-    restart: unless-stopped
+#  frontend:
+#    build:
+#      context: ./frontend
+#      dockerfile: Dockerfile
+#    ports:
+#      - "3000:80"
+#    environment:
+#      - AUTH_USERNAME=admin
+#      - AUTH_PASSWORD=resumeai
+#      - BACKEND_URL=http://backend:8008
+#    restart: unless-stopped
     # Special network config for Raspberry Pi
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    depends_on:
-      - backend
+#    extra_hosts:
+#      - "host.docker.internal:host-gateway"
+#    depends_on:
+#      - backend
 
   backup:
     image: alpine:latest
     volumes:
       - ./backend:/backup/backend
       - ./frontend:/backup/frontend
-      - backend_data:/backup/data
+#      - backend_data:/backup/data
       - resume_storage:/backup/resumes
       - postgres_data:/backup/postgres_data
       - ./backups:/backups
@@ -115,7 +115,7 @@ services:
         echo "Sleeping for 24 hours..."
         sleep 86400
       '
-    restart: unless-stopped
+#    restart: unless-stopped
 
 volumes:
   backend_data:
