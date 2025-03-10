@@ -17,10 +17,12 @@ import os
 import base64
 import secrets
 import time
+import shutil
 from fastapi import FastAPI, Depends, Request, HTTPException, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 
@@ -175,6 +177,33 @@ app.add_middleware(
     max_age=60 * 60  # Cache preflight requests for 1 hour
 )
 
+# Prepare frontend static files directory
+FRONTEND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "frontend")
+os.makedirs(FRONTEND_DIR, exist_ok=True)
+
+# Check if we should deploy a production build from the frontend directory
+FRONTEND_BUILD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "build")
+if os.path.exists(FRONTEND_BUILD_DIR):
+    # If the frontend build directory exists, copy its contents to our frontend directory
+    print(f"✅ Found React build directory at {FRONTEND_BUILD_DIR}, copying to {FRONTEND_DIR}")
+    for item in os.listdir(FRONTEND_BUILD_DIR):
+        source_path = os.path.join(FRONTEND_BUILD_DIR, item)
+        target_path = os.path.join(FRONTEND_DIR, item)
+        if os.path.isdir(source_path):
+            if os.path.exists(target_path):
+                shutil.rmtree(target_path)
+            shutil.copytree(source_path, target_path)
+        else:
+            shutil.copy2(source_path, target_path)
+    print("✅ Successfully copied React build files")
+else:
+    print(f"⚠️ React build directory not found at {FRONTEND_BUILD_DIR}")
+
+# Mount the static files directory if it exists
+static_dir = os.path.join(FRONTEND_DIR, "static")
+if os.path.exists(static_dir):
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
 # Authentication middleware removed - we'll add it only to the frontend
 
 # Include routers
@@ -185,14 +214,64 @@ app.include_router(process.router, prefix="/api/process", tags=["process"])
 app.include_router(tasks.router, prefix="/api/tasks", tags=["tasks"])
 app.include_router(statistics.router, prefix="/api/statistics", tags=["statistics"])
 
-# Root endpoint
-@app.get("/")
-async def root():
-    return {
-        "message": "Welcome to the ResumeAI API",
-        "version": "1.0.0",
-        "docs_url": "/docs",
-    }
+# Root endpoint - serves the React frontend
+@app.get("/", response_class=HTMLResponse)
+async def serve_frontend():
+    """Serve the React frontend index.html"""
+    index_path = os.path.join(FRONTEND_DIR, "index.html")
+    if os.path.exists(index_path):
+        with open(index_path, "r") as f:
+            return f.read()
+    else:
+        return HTMLResponse(content="""
+        <html>
+            <head>
+                <title>ResumeAI</title>
+                <style>
+                    body { font-family: Arial, sans-serif; margin: 40px; line-height: 1.6; }
+                    h1 { color: #2c3e50; }
+                    a { color: #3498db; text-decoration: none; }
+                    a:hover { text-decoration: underline; }
+                    .container { max-width: 800px; margin: 0 auto; }
+                    .card { border: 1px solid #ddd; padding: 20px; border-radius: 5px; margin-bottom: 20px; }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <h1>Welcome to ResumeAI</h1>
+                    <div class="card">
+                        <p>The frontend is not yet built. You can:</p>
+                        <ul>
+                            <li>Build the frontend with: <code>cd frontend && npm run build</code></li>
+                            <li>Access the API directly at <a href="/docs">/docs</a></li>
+                            <li>Access the backend health check at <a href="/api/health">/api/health</a></li>
+                        </ul>
+                    </div>
+                </div>
+            </body>
+        </html>
+        """)
+
+# Serve frontend assets for React routing
+@app.get("/{file_path:path}")
+async def serve_frontend_files(file_path: str):
+    """Serve any frontend files or return index.html for client-side routing"""
+    # Skip API routes
+    if file_path.startswith("api/"):
+        raise HTTPException(status_code=404, detail="API route not found")
+        
+    # Check if file exists in frontend directory
+    full_path = os.path.join(FRONTEND_DIR, file_path)
+    if os.path.isfile(full_path):
+        return FileResponse(full_path)
+    
+    # For client-side routing, return index.html
+    index_path = os.path.join(FRONTEND_DIR, "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+        
+    # If no index.html exists, return 404
+    raise HTTPException(status_code=404, detail="File not found")
 
 # Health check endpoint - no authentication required
 @app.get("/api/health")
