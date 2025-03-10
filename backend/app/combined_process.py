@@ -1037,6 +1037,24 @@ async def spider_vacatures():
             progress_logger.info(f"Succesvol gecrawled: {crawler_url}")
             markdown_data = extract_data_from_html(result.html, db_url)
             
+            # Function to parse dates into standard format
+            def parse_date(value: str) -> str:
+                """Convert a date string to the standard format."""
+                if not value:
+                    return ""
+                try:
+                    # Try different date formats
+                    for fmt in ['%d-%m-%Y', '%B %d, %Y', '%Y-%m-%d']:
+                        try:
+                            date_obj = datetime.datetime.strptime(value, fmt)
+                            return date_obj.strftime('%Y-%m-%d')
+                        except ValueError:
+                            continue
+                    return value
+                except Exception as e:
+                    logging.error(f"Error parsing date: {e}")
+                    return value
+            
             # Function to parse markdown data into structured format
             def parse_markdown_data(markdown, url):
                 """Parse Markdown data into a structured dictionary"""
@@ -1085,9 +1103,14 @@ async def spider_vacatures():
                     elif line.startswith("- **Tarief:**"):
                         data["Tarief"] = line.replace("- **Tarief:**", "").strip()
                     elif line.startswith("- **Geplaatst:**"):
-                        data["Geplaatst"] = line.replace("- **Geplaatst:**", "").strip()
+                        raw_date = line.replace("- **Geplaatst:**", "").strip()
+                        data["Geplaatst"] = parse_date(raw_date)
                     elif line.startswith("- **Sluitingsdatum:**"):
-                        data["Sluiting"] = line.replace("- **Sluitingsdatum:**", "").strip()
+                        raw_date = line.replace("- **Sluitingsdatum:**", "").strip()
+                        data["Sluiting"] = parse_date(raw_date)
+                    elif line.startswith("- **Sluiting:**"):
+                        raw_date = line.replace("- **Sluiting:**", "").strip()
+                        data["Sluiting"] = parse_date(raw_date)
                 
                 # Join the function description
                 data["Functieomschrijving"] = "\n".join(func_beschrijving)
@@ -1325,8 +1348,8 @@ async def spider_vacatures():
                                 vacancy_data.get("Uren", ""),
                                 vacancy_data.get("Tarief", ""),
                                 vacancy_data.get("Checked_resumes", ""),
-                                None,  # Set to None to avoid date format issues
-                                None,  # Set to None to avoid date format issues
+                                vacancy_data.get("Geplaatst", ""),  # Use the date string from vacancy data
+                                vacancy_data.get("Sluiting", ""),  # Use the date string from vacancy data
                                 vacancy_data.get("External_id", ""),
                                 vacancy_data.get("Model", ""),
                                 vacancy_data.get("Version", "")
