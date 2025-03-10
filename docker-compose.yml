@@ -5,10 +5,11 @@ services:
     image: ankane/pgvector:latest
 #    ports:
       - "5432:5432"
-#    environment:
+    environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
       - POSTGRES_DB=resumeai
+      - TZ=Europe/Amsterdam
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./database/init:/docker-entrypoint-initdb.d
@@ -23,9 +24,10 @@ services:
     image: dpage/pgadmin4
 #    ports:
       - "8080:80"
-#    environment:
+    environment:
       - PGADMIN_DEFAULT_EMAIL=admin@resumeai.com
       - PGADMIN_DEFAULT_PASSWORD=admin
+      - TZ=Europe/Amsterdam
     volumes:
       - pgadmin_data:/var/lib/pgadmin
 #    restart: unless-stopped
@@ -45,12 +47,13 @@ services:
       - resume_storage:/app/app/resumes
     env_file:
       - ./backend/.env.docker
-#    environment:
+    environment:
       - PYTHONUNBUFFERED=1
       # Override placeholder values with environment variables from host
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - SPINWEB_USER=${SPINWEB_USER}
       - SPINWEB_PASS=${SPINWEB_PASS}
+      - TZ=Europe/Amsterdam
 #    restart: unless-stopped
     command: uvicorn main:app --host 0.0.0.0 --port 8008 --reload
 #    depends_on:
@@ -77,6 +80,8 @@ services:
 
   backup:
     image: alpine:latest
+    environment:
+      - TZ=Europe/Amsterdam
     volumes:
       - ./backend:/backup/backend
       - ./frontend:/backup/frontend
