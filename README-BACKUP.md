@@ -5,8 +5,15 @@ This document provides a comprehensive guide on backing up and restoring your Re
 ## Quick Reference
 
 ```bash
-# Create a backup
+# Create a full backup
 ./manage.sh backup
+
+# Create a lightweight backup (excludes node_modules and other large directories)
+# Recommended for Raspberry Pi or systems with limited storage
+./manage.sh backup --light
+
+# Create a backup excluding just node_modules
+./manage.sh backup --exclude-node-modules
 
 # Restore from a backup
 ./manage.sh restore backups/resumeai_backup_20250310_123456.tar.gz
@@ -26,12 +33,36 @@ Each backup is a self-contained archive that can fully restore your application 
 
 ## Creating Backups
 
-### Standard Backup
+### Backup Types
 
-To create a standard backup of everything:
+#### Full Backup
+
+To create a complete backup of everything (code, database, configuration, files):
 
 ```bash
 ./manage.sh backup
+```
+
+#### Lightweight Backup (for Raspberry Pi or low-storage systems)
+
+To create a backup that excludes node_modules and other large directories:
+
+```bash
+./manage.sh backup --light
+```
+
+This creates a much smaller backup file that:
+- Excludes node_modules directories
+- Excludes build directories
+- Excludes Python cache files
+- Still includes all source code, configuration, and database dumps
+
+#### Backup Without Node Modules
+
+If you just want to exclude the node_modules directories:
+
+```bash
+./manage.sh backup --exclude-node-modules
 ```
 
 This will:
@@ -266,3 +297,31 @@ psql -d resumeai -f database_restore/resumeai.sql
 - Keep backup logs for troubleshooting
 - Make sure all Docker containers are running before creating a backup
 - Stop the application before restoring (to avoid conflicts)
+
+## Raspberry Pi and Low-Storage Systems
+
+When working with Raspberry Pi or systems with limited storage:
+
+1. **Always use lightweight backups**:
+   ```bash
+   ./manage.sh backup --light
+   ```
+
+2. **Check available disk space before restoring**:
+   ```bash
+   df -h
+   ```
+   
+3. **After restoring, reinstall node modules**:
+   ```bash
+   cd frontend
+   npm install
+   ```
+   
+4. **Clean up old backups regularly**:
+   ```bash
+   # Remove old backup files
+   find ./backups -name "*.tar.gz" -mtime +7 -delete
+   ```
+   
+5. **Consider using external storage** for backups and large files
