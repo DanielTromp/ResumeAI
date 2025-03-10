@@ -40,6 +40,7 @@ services:
       - "8008:8008"
     volumes:
       - ./backend:/app
+      - ./frontend/build:/app/frontend
       - backend_data:/app/app/data
       - resume_storage:/app/app/resumes
     env_file:

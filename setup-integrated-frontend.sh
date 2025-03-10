@@ -23,6 +23,12 @@ echo "Building the frontend..."
 cd frontend || exit 1
 npm install
 npm run build
+
+# Copy the build directory to the backend directory
+echo "Copying build files to backend directory..."
+mkdir -p ../backend/frontend
+cp -r build/* ../backend/frontend/
+
 cd ..
 
 echo "Frontend built successfully!"

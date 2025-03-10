@@ -182,22 +182,39 @@ FRONTEND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fronten
 os.makedirs(FRONTEND_DIR, exist_ok=True)
 
 # Check if we should deploy a production build from the frontend directory
-FRONTEND_BUILD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "build")
-if os.path.exists(FRONTEND_BUILD_DIR):
-    # If the frontend build directory exists, copy its contents to our frontend directory
-    print(f"✅ Found React build directory at {FRONTEND_BUILD_DIR}, copying to {FRONTEND_DIR}")
-    for item in os.listdir(FRONTEND_BUILD_DIR):
-        source_path = os.path.join(FRONTEND_BUILD_DIR, item)
-        target_path = os.path.join(FRONTEND_DIR, item)
-        if os.path.isdir(source_path):
-            if os.path.exists(target_path):
-                shutil.rmtree(target_path)
-            shutil.copytree(source_path, target_path)
-        else:
-            shutil.copy2(source_path, target_path)
-    print("✅ Successfully copied React build files")
-else:
-    print(f"⚠️ React build directory not found at {FRONTEND_BUILD_DIR}")
+# Try multiple possible build directory locations
+possible_build_dirs = [
+    # Standard location (outside the app directory)
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "build"),
+    # Docker-specific location
+    "/frontend/build",
+    # Relative to current directory
+    os.path.join("frontend", "build"),
+    # Mounted volume in Docker
+    "/app/frontend/build"
+]
+
+found_build_dir = False
+for build_dir in possible_build_dirs:
+    if os.path.exists(build_dir):
+        FRONTEND_BUILD_DIR = build_dir
+        found_build_dir = True
+        # If the frontend build directory exists, copy its contents to our frontend directory
+        print(f"✅ Found React build directory at {FRONTEND_BUILD_DIR}, copying to {FRONTEND_DIR}")
+        for item in os.listdir(FRONTEND_BUILD_DIR):
+            source_path = os.path.join(FRONTEND_BUILD_DIR, item)
+            target_path = os.path.join(FRONTEND_DIR, item)
+            if os.path.isdir(source_path):
+                if os.path.exists(target_path):
+                    shutil.rmtree(target_path)
+                shutil.copytree(source_path, target_path)
+            else:
+                shutil.copy2(source_path, target_path)
+        print("✅ Successfully copied React build files")
+        break
+
+if not found_build_dir:
+    print(f"⚠️ React build directory not found. Checked: {', '.join(possible_build_dirs)}")
 
 # Mount the static files directory if it exists
 static_dir = os.path.join(FRONTEND_DIR, "static")
