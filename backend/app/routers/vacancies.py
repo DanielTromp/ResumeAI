@@ -15,6 +15,42 @@ from functools import lru_cache
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
+# Helper function to process character-by-character JSON
+def process_match_toelichting(match_toelichting):
+    """
+    Process match_toelichting data that might be in character-by-character format.
+    Returns the processed data as a string to maintain compatibility with the API model.
+    """
+    if not match_toelichting:
+        return match_toelichting
+        
+    # Check if it's a character-by-character object (dict with numeric keys)
+    if isinstance(match_toelichting, dict) and len(match_toelichting) > 0:
+        # Check if keys are sequential numbers (0, 1, 2, ...)
+        keys = list(match_toelichting.keys())
+        if all(isinstance(key, str) and key.isdigit() for key in keys):
+            try:
+                # Sort keys numerically and join characters
+                sorted_keys = sorted(keys, key=int)
+                combined_string = ''.join(match_toelichting[key] for key in sorted_keys)
+                
+                # Always return a string to maintain compatibility with the model
+                return combined_string
+            except Exception as e:
+                logger.warning(f"Error processing character-by-character object: {e}")
+                # Fall through to default handling
+                return json.dumps(match_toelichting) if isinstance(match_toelichting, dict) else str(match_toelichting)
+        else:
+            # Not a character-by-character object, return as JSON string
+            return json.dumps(match_toelichting)
+    
+    # If it's already a string, return as-is
+    if isinstance(match_toelichting, str):
+        return match_toelichting
+    
+    # For other types, convert to JSON string
+    return json.dumps(match_toelichting)
+
 from app.db_interfaces.postgres import (
     get_all_vacancies, get_vacancy, create_vacancy, update_vacancy, delete_vacancy,
     get_vacancy_statistics, rebuild_vacancy_statistics
@@ -147,44 +183,17 @@ async def get_vacancies(
             # Check for both versions of field name (with and without underscore)
             match_toelichting = vacancy.get("Match Toelichting") or vacancy.get("Match_Toelichting")
             
-            # Store in both field names to ensure compatibility
+            # Process and store match details in both field names for compatibility
             if match_toelichting:
-                try:
-                    # Check if it looks like JSON
-                    if isinstance(match_toelichting, str) and (
-                        match_toelichting.strip().startswith("{") or 
-                        match_toelichting.strip().startswith("[")
-                    ):
-                        # Try to parse JSON and convert to markdown
-                        match_data = json.loads(match_toelichting)
-                        
-                        # Convert to markdown based on structure
-                        if isinstance(match_data, dict):
-                            markdown = ""
-                            for key, value in match_data.items():
-                                markdown += f"## {key}\n"
-                                if isinstance(value, list):
-                                    for item in value:
-                                        markdown += f"- {item}\n"
-                                elif isinstance(value, dict):
-                                    for subkey, subvalue in value.items():
-                                        markdown += f"### {subkey}\n{subvalue}\n\n"
-                                else:
-                                    markdown += f"{value}\n\n"
-                            
-                            # Store in both field names for compatibility
-                            vacancy["Match Toelichting"] = markdown
-                            vacancy["Match_Toelichting"] = markdown
-                    else:
-                        # Not JSON, just copy to both fields
-                        vacancy["Match Toelichting"] = match_toelichting
-                        vacancy["Match_Toelichting"] = match_toelichting
-                    
-                except Exception as e:
-                    logger.warning(f"Failed to convert Match Toelichting to markdown: {e}")
-                    # Keep original if conversion fails
-                    vacancy["Match Toelichting"] = match_toelichting
-                    vacancy["Match_Toelichting"] = match_toelichting
+                # Use our helper function to process the match_toelichting
+                processed_data = process_match_toelichting(match_toelichting)
+                
+                # Store the processed data in both field names
+                vacancy["Match Toelichting"] = processed_data
+                vacancy["Match_Toelichting"] = processed_data
+                
+                if processed_data != match_toelichting:
+                    logger.info("Successfully processed Match_Toelichting data")
         
         # Fix any datetime objects before returning
         for vacancy in sorted_vacancies:
@@ -264,44 +273,17 @@ async def get_vacancy_endpoint(
         # Check for both versions of field name (with and without underscore)
         match_toelichting = vacancy_data.get("Match Toelichting") or vacancy_data.get("Match_Toelichting")
         
-        # Store in both field names to ensure compatibility
+        # Process and store match details in both field names for compatibility
         if match_toelichting:
-            try:
-                # Check if it looks like JSON
-                if isinstance(match_toelichting, str) and (
-                    match_toelichting.strip().startswith("{") or 
-                    match_toelichting.strip().startswith("[")
-                ):
-                    # Try to parse JSON and convert to markdown
-                    match_data = json.loads(match_toelichting)
-                    
-                    # Convert to markdown based on structure
-                    if isinstance(match_data, dict):
-                        markdown = ""
-                        for key, value in match_data.items():
-                            markdown += f"## {key}\n"
-                            if isinstance(value, list):
-                                for item in value:
-                                    markdown += f"- {item}\n"
-                            elif isinstance(value, dict):
-                                for subkey, subvalue in value.items():
-                                    markdown += f"### {subkey}\n{subvalue}\n\n"
-                            else:
-                                markdown += f"{value}\n\n"
-                        
-                        # Store in both field names for compatibility
-                        vacancy_data["Match Toelichting"] = markdown
-                        vacancy_data["Match_Toelichting"] = markdown
-                else:
-                    # Not JSON, just copy to both fields
-                    vacancy_data["Match Toelichting"] = match_toelichting
-                    vacancy_data["Match_Toelichting"] = match_toelichting
-                
-            except Exception as e:
-                logger.warning(f"Failed to convert Match Toelichting to markdown: {e}")
-                # Keep original if conversion fails
-                vacancy_data["Match Toelichting"] = match_toelichting
-                vacancy_data["Match_Toelichting"] = match_toelichting
+            # Use our helper function to process the match_toelichting
+            processed_data = process_match_toelichting(match_toelichting)
+            
+            # Store the processed data in both field names
+            vacancy_data["Match Toelichting"] = processed_data
+            vacancy_data["Match_Toelichting"] = processed_data
+            
+            if processed_data != match_toelichting:
+                logger.info("Successfully processed Match_Toelichting data")
         
         # Add debugging log
         logger.info(f"Returning vacancy data: {vacancy_data}")

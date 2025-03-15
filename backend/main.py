@@ -112,29 +112,40 @@ class BasicAuthMiddleware:
     def __init__(self, app):
         self.app = app
 
-    async def __call__(self, request: Request, call_next):
-        # Skip auth for /docs, /openapi.json, /redoc and /api/health
-        if request.url.path in ["/docs", "/openapi.json", "/redoc", "/api/health"]:
-            return await call_next(request)
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+            
+        request = Request(scope)
+        # Skip auth for /docs, /openapi.json, /redoc, /api/health and static files
+        if (request.url.path in ["/docs", "/openapi.json", "/redoc", "/api/health"] or
+            request.url.path.startswith("/static/")):
+            await self.app(scope, receive, send)
+            return
             
         # Check for Authorization header
         auth_header = request.headers.get("Authorization")
         if not auth_header:
-            return JSONResponse(
+            response = JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 content={"detail": "Not authenticated"},
                 headers={"WWW-Authenticate": "Basic"},
             )
+            await response(scope, receive, send)
+            return
         
         # Parse auth header
         try:
             scheme, credentials = auth_header.split()
             if scheme.lower() != "basic":
-                return JSONResponse(
+                response = JSONResponse(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     content={"detail": "Invalid authentication scheme"},
                     headers={"WWW-Authenticate": "Basic"},
                 )
+                await response(scope, receive, send)
+                return
                 
             decoded = base64.b64decode(credentials).decode("utf-8")
             username, password = decoded.split(":")
@@ -144,19 +155,23 @@ class BasicAuthMiddleware:
             is_password_correct = secrets.compare_digest(password, AUTH_PASSWORD)
             
             if not (is_username_correct and is_password_correct):
-                return JSONResponse(
+                response = JSONResponse(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     content={"detail": "Invalid credentials"},
                     headers={"WWW-Authenticate": "Basic"},
                 )
+                await response(scope, receive, send)
+                return
         except Exception:
-            return JSONResponse(
+            response = JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 content={"detail": "Invalid authentication credentials"},
                 headers={"WWW-Authenticate": "Basic"},
             )
+            await response(scope, receive, send)
+            return
             
-        return await call_next(request)
+        await self.app(scope, receive, send)
 
 # Create the FastAPI app
 app = FastAPI(
@@ -211,7 +226,8 @@ static_dir = os.path.join(FRONTEND_DIR, "static")
 if os.path.exists(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
-# Authentication middleware removed - we'll add it only to the frontend
+# Add authentication middleware
+app.add_middleware(BasicAuthMiddleware)
 
 # Include routers
 app.include_router(vacancies.router, prefix="/api/vacancies", tags=["vacancies"])

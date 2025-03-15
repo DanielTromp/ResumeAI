@@ -3,17 +3,16 @@ version: '3'
 services:
   db:
     image: ankane/pgvector:latest
-    ports:
+#    ports:
       - "5432:5432"
-    environment:
+#    environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
       - POSTGRES_DB=resumeai
-      - TZ=Europe/Amsterdam
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./database/init:/docker-entrypoint-initdb.d
-    restart: unless-stopped
+#    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -22,23 +21,22 @@ services:
       
   pgadmin:
     image: dpage/pgadmin4
-    ports:
+#    ports:
       - "8080:80"
-    environment:
+#    environment:
       - PGADMIN_DEFAULT_EMAIL=admin@resumeai.com
       - PGADMIN_DEFAULT_PASSWORD=admin
-      - TZ=Europe/Amsterdam
     volumes:
       - pgadmin_data:/var/lib/pgadmin
-    restart: unless-stopped
-    depends_on:
+#    restart: unless-stopped
+#    depends_on:
       - db
 
   backend:
-    build:
+#    build:
       context: .
       dockerfile: backend/Dockerfile.dev
-    ports:
+#    ports:
       - "8008:8008"
     volumes:
       - ./backend:/app
@@ -47,18 +45,15 @@ services:
       - resume_storage:/app/app/resumes
     env_file:
       - ./backend/.env.docker
-    environment:
+#    environment:
       - PYTHONUNBUFFERED=1
       # Override placeholder values with environment variables from host
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - SPINWEB_USER=${SPINWEB_USER}
-      - FRONTEND_URL=https://resumeai.trmp.dev
       - SPINWEB_PASS=${SPINWEB_PASS}
-      - SCHEDULER_ENABLED=false
-      - TZ=Europe/Amsterdam
-    restart: unless-stopped
+#    restart: unless-stopped
     command: uvicorn main:app --host 0.0.0.0 --port 8008 --reload
-    depends_on:
+#    depends_on:
       db:
         condition: service_healthy
 
@@ -80,88 +75,47 @@ services:
 #    depends_on:
 #      - backend
 
-  scheduler-backup:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile.dev
+  backup:
+    image: alpine:latest
     volumes:
-      - ./backend:/app
-      - resume_storage:/app/app/resumes
-      # Backup volumes
+      - ./backend:/backup/backend
       - ./frontend:/backup/frontend
+#      - backend_data:/backup/data
       - resume_storage:/backup/resumes
       - postgres_data:/backup/postgres_data
       - ./backups:/backups
-    env_file:
-      - ./backend/.env.docker
-    environment:
-      - PYTHONUNBUFFERED=1
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - SPINWEB_USER=${SPINWEB_USER}
-      - SPINWEB_PASS=${SPINWEB_PASS}
-      - SCHEDULER_ENABLED=true
-      - TZ=Europe/Amsterdam
-    restart: unless-stopped
-    entrypoint: /bin/sh
     command: |
-      -c '
-      # Install backup tools
-      apk add --no-cache tar gzip findutils
-
-      # Start the scheduler process in the background
-      python -m app.combined_process --cron &
-      SCHEDULER_PID=$$!
-      echo "Started scheduler with PID: $$SCHEDULER_PID"
-      
-      # Run daily backup job
-      while true; do
-        # Get current date/time
-        DATE=$$(date +%Y%m%d_%H%M%S)
-        echo "Starting backup job at $$(date)"
-        
+      /bin/sh -c '
+        apk add --no-cache tar gzip 
         mkdir -p /backups
-        
-        # Create backup directory structure
-        mkdir -p /backup/backend
-        cp -r /app/* /backup/backend/
+        echo "Creating backup..."
+        DATE=$$(date +%Y%m%d_%H%M%S)
         
         # Create full backup (with exclusions for node_modules)
-        echo "Creating full backup..."
-        tar -czf /backups/resumeai_backup_$$DATE.tar.gz \
-          --exclude="/backup/frontend/node_modules" \
-          /backup
-        echo "✅ Full backup created at /backups/resumeai_backup_$$DATE.tar.gz"
+        tar -czf /backups/resumeai_backup_$$DATE.tar.gz --exclude="/backup/frontend/node_modules" /backup
+        echo "Full backup created at /backups/resumeai_backup_$$DATE.tar.gz"
         
-        # Create lightweight backup
-        echo "Creating lightweight backup..."
+        # Create lightweight backup (for Raspberry Pi and low storage systems)
         tar -czf /backups/resumeai_backup_$$DATE_light.tar.gz \
           --exclude="/backup/frontend/node_modules" \
           --exclude="/backup/frontend/build" \
           --exclude="/backup/backend/__pycache__" \
           --exclude="/backup/backend/**/__pycache__" \
           /backup
-        echo "✅ Lightweight backup created at /backups/resumeai_backup_$$DATE_light.tar.gz"
+        echo "Lightweight backup created at /backups/resumeai_backup_$$DATE_light.tar.gz"
         
         # Calculate sizes
         FULL_SIZE=$$(du -h /backups/resumeai_backup_$$DATE.tar.gz | cut -f1)
         LIGHT_SIZE=$$(du -h /backups/resumeai_backup_$$DATE_light.tar.gz | cut -f1)
-        echo "Backup sizes: Full=$$FULL_SIZE, Light=$$LIGHT_SIZE"
+        echo "Full backup size: $$FULL_SIZE, Light backup size: $$LIGHT_SIZE"
         
         # Clean up old backups (keep last 7 days)
-        echo "Cleaning up old backups..."
         find /backups -name "*.tar.gz" -mtime +7 -delete
         
-        # Clean up the temporary backup directory
-        rm -rf /backup/backend
-        
-        # Sleep for 24 hours
-        echo "Backup complete. Next backup in 24 hours"
+        echo "Sleeping for 24 hours..."
         sleep 86400
-      done
       '
-    depends_on:
-      db:
-        condition: service_healthy
+#    restart: unless-stopped
 
 volumes:
   backend_data:

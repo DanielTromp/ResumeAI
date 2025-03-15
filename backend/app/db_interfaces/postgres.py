@@ -7,6 +7,7 @@ Provides direct interface to PostgreSQL database operations.
 import os
 import json
 import logging
+import datetime
 import psycopg2
 import psycopg2.extras
 from typing import List, Dict, Any, Optional, Tuple
@@ -46,7 +47,8 @@ def get_all_vacancies(status: Optional[str] = None, skip: int = 0, limit: int = 
         params = []
         
         if status:
-            where_clause = " WHERE status = %s"
+            # Make sure we handle case sensitivity correctly
+            where_clause = " WHERE LOWER(status) = LOWER(%s)"
             params.append(status)
         
         # Get total count first with the same filters, but no pagination
@@ -98,6 +100,18 @@ def get_all_vacancies(status: Optional[str] = None, skip: int = 0, limit: int = 
                 result['Uren'] = result['uren']
             if 'tarief' in result:
                 result['Tarief'] = result['tarief']
+            if 'geplaatst' in result:
+                # Format the timestamp as a readable date
+                if isinstance(result['geplaatst'], datetime.datetime):
+                    result['Geplaatst'] = result['geplaatst'].strftime('%Y-%m-%d')
+                else:
+                    result['Geplaatst'] = str(result['geplaatst'])
+            if 'sluiting' in result:
+                # Format the timestamp as a readable date
+                if isinstance(result['sluiting'], datetime.datetime):
+                    result['Sluiting'] = result['sluiting'].strftime('%Y-%m-%d')
+                else:
+                    result['Sluiting'] = str(result['sluiting'])
             if 'top_match' in result:
                 result['Top_Match'] = result['top_match']
             if 'match_toelichting' in result:
@@ -157,6 +171,18 @@ def get_vacancy(vacancy_id: str) -> Optional[Dict[str, Any]]:
                 result['Uren'] = result['uren']
             if 'tarief' in result:
                 result['Tarief'] = result['tarief']
+            if 'geplaatst' in result:
+                # Format the timestamp as a readable date
+                if isinstance(result['geplaatst'], datetime.datetime):
+                    result['Geplaatst'] = result['geplaatst'].strftime('%Y-%m-%d')
+                else:
+                    result['Geplaatst'] = str(result['geplaatst'])
+            if 'sluiting' in result:
+                # Format the timestamp as a readable date
+                if isinstance(result['sluiting'], datetime.datetime):
+                    result['Sluiting'] = result['sluiting'].strftime('%Y-%m-%d')
+                else:
+                    result['Sluiting'] = str(result['sluiting'])
             if 'top_match' in result:
                 result['Top_Match'] = result['top_match']
             if 'match_toelichting' in result:

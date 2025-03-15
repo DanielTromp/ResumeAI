@@ -23,6 +23,11 @@ import json
 import asyncio
 import logging
 import logging.handlers
+import argparse
+import time
+import datetime
+import schedule
+from threading import Thread
 from collections import defaultdict
 
 # Third-party imports
@@ -1698,7 +1703,129 @@ async def main():
     except Exception as e:
         progress_logger.error(f"❌ Fout in het gecombineerde proces: {str(e)}", exc_info=True)
 
+# Function to run the scheduler for cron mode
+def run_scheduler_cron():
+    """Run the process on a schedule in cron mode."""
+    from app.config import scheduler_config
+    
+    # Initialize scheduling
+    start_hour = scheduler_config.start_hour
+    end_hour = scheduler_config.end_hour
+    interval_minutes = scheduler_config.interval_minutes
+    days = scheduler_config.days
+    
+    # Calculate fixed time points for the schedule
+    scheduled_hours = []
+    for hour in range(start_hour, end_hour + 1, max(1, interval_minutes // 60)):
+        if hour <= end_hour:
+            scheduled_hours.append(hour)
+    
+    # Log the actual hours that will be scheduled
+    progress_logger.info(f"Scheduling jobs at these hours: {scheduled_hours}")
+    
+    # Convert day names to schedule day functions
+    day_functions = {
+        'mon': schedule.every().monday,
+        'tue': schedule.every().tuesday,
+        'wed': schedule.every().wednesday,
+        'thu': schedule.every().thursday,
+        'fri': schedule.every().friday,
+        'sat': schedule.every().saturday,
+        'sun': schedule.every().sunday
+    }
+    
+    # Schedule jobs for each active day
+    for day in days:
+        if day in day_functions:
+            # Schedule jobs at specific hours
+            for hour in scheduled_hours:
+                job_time = f"{hour:02d}:00"  # Always use 00 for minutes
+                day_functions[day].at(job_time).do(lambda: asyncio.run(main(cron_mode=True)))
+                progress_logger.info(f"Scheduled job: {day} at {job_time}")
+    
+    # Check if we're in an active window and should run immediately
+    now = datetime.datetime.now()
+    current_hour = now.hour
+    current_minute = now.minute
+    current_day = now.strftime("%a").lower()
+    
+    # Check if this is a time we would normally run (exact hour match)
+    in_active_window = (
+        current_hour in scheduled_hours and 
+        current_day in days and 
+        current_minute < 5  # Allow a 5-minute window after the hour
+    )
+    
+    if in_active_window:
+        progress_logger.info(f"In active window at {now}, running process immediately")
+        # Run process in background thread
+        Thread(target=lambda: asyncio.run(main(cron_mode=True)), daemon=True).start()
+    
+    # Run the scheduler continuously with better logging
+    progress_logger.info(f"Starting scheduler loop with {len(days)} days and {len(scheduled_hours)} time slots")
+    progress_logger.info(f"Next scheduled run: {schedule.next_run()}")
+    
+    while True:
+        # Run any pending jobs
+        schedule.run_pending()
+        
+        # Sleep for a minute with occasional heartbeat logging
+        for _ in range(60):  # Check every minute but log only every hour
+            if datetime.datetime.now().minute == 0:
+                next_run = schedule.next_run()
+                progress_logger.info(f"Scheduler heartbeat: {datetime.datetime.now()}, next run: {next_run}")
+            time.sleep(1)  # Sleep for 1 second, loop 60 times = 1 minute total
+
+async def main(cron_mode=False):
+    """Main function for the entire process."""
+    try:
+        # Test PostgreSQL connection and set up test data
+        try:
+            # Import database functions
+            from app.db_init import get_connection, initialize_database, add_test_data
+            
+            # Test connection
+            conn = get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1")
+            cursor.close()
+            conn.close()
+            progress_logger.info("✅ PostgreSQL connection successful")
+            
+            # Initialize database and insert test data if needed
+            initialize_database()
+            # Skip test data in cron mode
+            if not cron_mode:
+                add_test_data()
+        except Exception as e:
+            progress_logger.error(f"❌ PostgreSQL connection failed: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return
+
+        # Run the combined process
+        progress_logger.info("🚀 Starting combined vacancy & resume matching process")
+        if cron_mode:
+            progress_logger.info("Running in scheduled cron mode")
+        
+        # Run the main process
+        await spider_vacatures()
+
+        progress_logger.info("✅ Process completed successfully!")
+    except Exception as e:
+        progress_logger.error(f"❌ Error in combined process: {str(e)}", exc_info=True)
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description="Combined vacancy and resume matching process")
+    parser.add_argument("--cron", action="store_true", help="Run in cron mode (for scheduled execution)")
+    args = parser.parse_args()
+    
+    if args.cron:
+        progress_logger.info("🕒 Starting in cron mode - will run according to schedule")
+        run_scheduler_cron()
+    else:
+        progress_logger.info("🚀 Starting in manual mode - running once")
+        asyncio.run(main())
 
 # End of file

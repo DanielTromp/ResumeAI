@@ -185,11 +185,325 @@ const VacancyDetail = () => {
   let matchDetails = null;
   try {
     if (vacancy.Match_Toelichting) {
-      matchDetails = JSON.parse(vacancy.Match_Toelichting);
+      console.log("Match_Toelichting found, type:", typeof vacancy.Match_Toelichting);
+      
+      // Try to parse the match details as JSON
+      if (typeof vacancy.Match_Toelichting === 'string') {
+        console.log("String format detected, length:", vacancy.Match_Toelichting.length);
+        try {
+          matchDetails = JSON.parse(vacancy.Match_Toelichting);
+          console.log('Successfully parsed match details as JSON:', matchDetails);
+        } catch (jsonError) {
+          console.error('Failed to parse match details as JSON:', jsonError);
+          // If not valid JSON, check if it might be a stringified JSON string (double encoded)
+          try {
+            const unescaped = vacancy.Match_Toelichting.replace(/\\"/g, '"');
+            matchDetails = JSON.parse(unescaped);
+            console.log('Successfully parsed double-encoded match details');
+          } catch (doubleJsonError) {
+            console.error('Not a double-encoded JSON either:', doubleJsonError);
+            // If not JSON at all, use the raw text
+            matchDetails = { raw_text: vacancy.Match_Toelichting };
+          }
+        }
+      } else if (typeof vacancy.Match_Toelichting === 'object') {
+        console.log("Object format detected, keys:", Object.keys(vacancy.Match_Toelichting).length);
+        
+        // Check if it might be a character-by-character object
+        const keys = Object.keys(vacancy.Match_Toelichting);
+        const isNumericKeys = keys.every(key => !isNaN(parseInt(key)));
+        console.log("All keys are numeric:", isNumericKeys);
+        
+        // Check if keys are sequential
+        const isSequential = keys.length > 0 && 
+                             keys.map(Number).sort((a, b) => a - b).join(',') === 
+                             [...Array(keys.length).keys()].join(',');
+        console.log("Keys are sequential:", isSequential);
+        
+        // If both conditions are true, this is likely a character-by-character object
+        if (isNumericKeys && isSequential) {
+          console.log("Character-by-character format detected");
+          try {
+            // Combine all characters into a single string and parse
+            const combinedString = Object.values(vacancy.Match_Toelichting).join('');
+            console.log("Combined string (first 100 chars):", combinedString.substring(0, 100));
+            matchDetails = JSON.parse(combinedString);
+            console.log('Successfully parsed character-by-character JSON:', matchDetails);
+          } catch (charJsonError) {
+            console.error('Failed to parse character JSON:', charJsonError);
+            // If not parseable as JSON, store as raw object
+            console.log("Storing original character-by-character object for direct handling in renderer");
+            matchDetails = vacancy.Match_Toelichting;
+          }
+        } else {
+          // Already a proper object, use as is
+          console.log("Using object as-is");
+          matchDetails = vacancy.Match_Toelichting;
+        }
+      }
+    } else {
+      console.log("No Match_Toelichting found in vacancy");
     }
   } catch (e) {
-    console.error('Error parsing match details:', e);
+    console.error('Error handling match details:', e);
   }
+  
+  // Add debug output after processing
+  console.log("Final matchDetails type:", typeof matchDetails);
+  if (typeof matchDetails === 'object') {
+    console.log("matchDetails keys:", Object.keys(matchDetails));
+  }
+
+  // Function to render match details in a more readable format
+  const renderMatchDetails = (text) => {
+    if (!text) return null;
+
+    // Handle the character-by-character array case first
+    if (typeof text === 'object' && !Array.isArray(text)) {
+      // Check if it's a character-by-character object (keys are sequential numbers)
+      const keys = Object.keys(text);
+      const isNumericKeys = keys.every(key => !isNaN(parseInt(key)));
+      
+      if (isNumericKeys) {
+        // Sort the keys numerically to ensure correct order
+        const sortedKeys = keys.map(Number).sort((a, b) => a - b);
+        
+        // Check if keys are sequential
+        const isSequential = sortedKeys.length > 0 && 
+                            sortedKeys.join(',') === 
+                            [...Array(sortedKeys.length).keys()].join(',');
+        
+        if (isSequential) {
+          console.log("Detected character-by-character format, rebuilding string");
+          
+          // Use sortedKeys to maintain proper order
+          const combinedString = sortedKeys.map(key => 
+            text[key.toString()]
+          ).join('');
+          
+          try {
+            // Try to parse the reconstructed string as JSON
+            const jsonObject = JSON.parse(combinedString);
+            console.log("Successfully parsed combined string as JSON");
+            return renderJsonAsHtml(jsonObject);
+          } catch (e) {
+            console.error("Failed to parse combined string as JSON:", e);
+            // If not valid JSON, display the combined string as plain text
+            return formatAsMarkdown(combinedString);
+          }
+        }
+      }
+    }
+
+    // Regular string case
+    if (typeof text === 'string') {
+      try {
+        const jsonObject = JSON.parse(text);
+        return renderJsonAsHtml(jsonObject);
+      } catch (e) {
+        // Not JSON, try to format as markdown-like text
+        return formatAsMarkdown(text);
+      }
+    } else if (typeof text === 'object') {
+      return renderJsonAsHtml(text);
+    }
+    
+    // Fallback to plain text
+    return text;
+  };
+
+  // Convert JSON to styled HTML
+  const renderJsonAsHtml = (jsonObj) => {
+    // Handle case where jsonObj might be a string that needs parsing
+    let parsedObj = jsonObj;
+    
+    if (typeof jsonObj === 'string') {
+      try {
+        // Try to parse string as JSON
+        parsedObj = JSON.parse(jsonObj);
+      } catch (e) {
+        // Not a parseable JSON string
+        return (
+          <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap' }}>
+            {jsonObj.toString()}
+          </Typography>
+        );
+      }
+    } else if (typeof jsonObj === 'object' && !Array.isArray(jsonObj)) {
+      // Check if it's a character-by-character object (keys are sequential numbers)
+      const keys = Object.keys(jsonObj);
+      const isNumericKeys = keys.every(key => !isNaN(parseInt(key)));
+      
+      if (isNumericKeys) {
+        // Sort the keys numerically to ensure correct order
+        const sortedKeys = keys.map(Number).sort((a, b) => a - b);
+        
+        // Check if keys are sequential
+        const isSequential = sortedKeys.length > 0 && 
+                             sortedKeys.join(',') === 
+                             [...Array(sortedKeys.length).keys()].join(',');
+        
+        if (isSequential) {
+          console.log("renderJsonAsHtml: Found character-by-character object");
+          
+          // Use sortedKeys to maintain proper order
+          const combinedString = sortedKeys.map(key => 
+            jsonObj[key.toString()]
+          ).join('');
+          
+          try {
+            // Try to parse the reconstructed string as JSON
+            parsedObj = JSON.parse(combinedString);
+          } catch (e) {
+            console.error("Failed to parse combined string as JSON:", e);
+            // If not valid JSON, display the combined string as plain text
+            return (
+              <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap' }}>
+                {combinedString}
+              </Typography>
+            );
+          }
+        }
+      }
+    }
+    
+    // If it's an array
+    if (Array.isArray(parsedObj)) {
+      return (
+        <Box component="div">
+          {parsedObj.map((item, i) => (
+            <Box key={i} sx={{ mb: 2 }}>
+              {typeof item === 'object' ? renderJsonAsHtml(item) : item}
+            </Box>
+          ))}
+        </Box>
+      );
+    }
+    
+    // If it's an object
+    if (typeof parsedObj === 'object' && parsedObj !== null) {
+      return (
+        <Box component="div">
+          {Object.entries(parsedObj).map(([key, value], i) => {
+            // Skip numeric keys that might be from character-by-character parsing
+            if (!isNaN(parseInt(key)) && typeof value === 'string' && value.length === 1) {
+              return null;
+            }
+            
+            const formattedKey = key.replace(/_/g, ' ');
+            
+            if (typeof value === 'object' && value !== null) {
+              return (
+                <Box key={i} sx={{ mb: 2 }}>
+                  <Typography variant="h6" sx={{ color: 'primary.main', mb: 1 }}>
+                    {formattedKey}:
+                  </Typography>
+                  <Box sx={{ pl: 2 }}>
+                    {renderJsonAsHtml(value)}
+                  </Box>
+                </Box>
+              );
+            }
+            
+            // Handle arrays
+            if (Array.isArray(value)) {
+              return (
+                <Box key={i} sx={{ mb: 2 }}>
+                  <Typography variant="subtitle2" fontWeight="bold">
+                    {formattedKey}:
+                  </Typography>
+                  <ul style={{ margin: 0, paddingLeft: 20 }}>
+                    {value.map((item, j) => (
+                      <li key={j}>
+                        <Typography variant="body2">{item}</Typography>
+                      </li>
+                    ))}
+                  </ul>
+                </Box>
+              );
+            }
+            
+            // Simple key-value pairs
+            return (
+              <Box key={i} sx={{ mb: 1 }}>
+                <Typography variant="body1">
+                  <strong>{formattedKey}:</strong> {value}
+                </Typography>
+              </Box>
+            );
+          })}
+        </Box>
+      );
+    }
+    
+    // Fallback for primitive values
+    return (
+      <Typography variant="body1">
+        {String(parsedObj)}
+      </Typography>
+    );
+  };
+
+  // Format plain text as markdown-like content
+  const formatAsMarkdown = (text) => {
+    if (!text) return null;
+    
+    // Split by lines
+    const lines = text.split('\n');
+    
+    return (
+      <Box component="div">
+        {lines.map((line, i) => {
+          // Heading detection
+          if (line.startsWith('# ')) {
+            return (
+              <Typography key={i} variant="h4" gutterBottom>
+                {line.substring(2)}
+              </Typography>
+            );
+          }
+          
+          if (line.startsWith('## ')) {
+            return (
+              <Typography key={i} variant="h5" gutterBottom sx={{ color: 'primary.main' }}>
+                {line.substring(3)}
+              </Typography>
+            );
+          }
+          
+          if (line.startsWith('### ')) {
+            return (
+              <Typography key={i} variant="h6" gutterBottom>
+                {line.substring(4)}
+              </Typography>
+            );
+          }
+          
+          // List item detection
+          if (line.startsWith('- ') || line.startsWith('* ')) {
+            return (
+              <Box key={i} sx={{ display: 'flex', alignItems: 'flex-start', mb: 0.5 }}>
+                <Box component="span" sx={{ mr: 1 }}>•</Box>
+                <Typography variant="body2">{line.substring(2)}</Typography>
+              </Box>
+            );
+          }
+          
+          // Empty line
+          if (line.trim() === '') {
+            return <Box key={i} sx={{ height: '0.5em' }} />;
+          }
+          
+          // Regular paragraph
+          return (
+            <Typography key={i} variant="body2" paragraph>
+              {line}
+            </Typography>
+          );
+        })}
+      </Box>
+    );
+  };
 
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
@@ -241,7 +555,7 @@ const VacancyDetail = () => {
 
       <Grid container spacing={3}>
         {/* Main Vacancy Information */}
-        <Grid item xs={12} md={8}>
+        <Grid item xs={12} lg={8}>
           <Paper sx={{ p: 3, mb: 3 }}>
             {editing ? (
               <>
@@ -384,88 +698,230 @@ const VacancyDetail = () => {
           </Paper>
         </Grid>
 
-        {/* Sidebar - Match Information */}
-        <Grid item xs={12} md={4}>
-          <Card sx={{ mb: 3 }}>
-            <CardHeader
-              title="Match Details"
-              subheader={`Match Score: ${vacancy.Top_Match || 0}%`}
-            />
-            <CardContent>
-              {vacancy.Checked_resumes ? (
-                <>
-                  <Typography variant="subtitle1" gutterBottom>
-                    Checked Resumes:
-                  </Typography>
-                  <Box sx={{ mb: 2 }}>
-                    {vacancy.Checked_resumes.split(',').map((name) => (
-                      <Chip
-                        key={name}
-                        label={name.trim()}
-                        size="small"
-                        sx={{ m: 0.5 }}
-                      />
-                    ))}
-                  </Box>
-                </>
-              ) : (
-                <Typography variant="body2" color="text.secondary">
-                  No resumes checked yet
-                </Typography>
-              )}
-
-              {matchDetails && matchDetails.beste_match && (
-                <>
-                  <Divider sx={{ my: 2 }} />
-                  <Typography variant="subtitle1" gutterBottom>
-                    Best Match: {matchDetails.beste_match.name} ({matchDetails.beste_match.percentage}%)
-                  </Typography>
-                  <Typography variant="subtitle2" sx={{ mt: 1 }}>
-                    Strengths:
-                  </Typography>
-                  <ul>
-                    {matchDetails.beste_match.sterke_punten.map((point, index) => (
-                      <li key={index}>
-                        <Typography variant="body2">{point}</Typography>
-                      </li>
-                    ))}
-                  </ul>
-                  <Typography variant="subtitle2" sx={{ mt: 1 }}>
-                    Weaknesses:
-                  </Typography>
-                  <ul>
-                    {matchDetails.beste_match.zwakke_punten.map((point, index) => (
-                      <li key={index}>
-                        <Typography variant="body2">{point}</Typography>
-                      </li>
-                    ))}
-                  </ul>
-                  <Typography variant="subtitle2" sx={{ mt: 1 }}>
-                    Final Assessment:
-                  </Typography>
-                  <Typography variant="body2">
-                    {matchDetails.beste_match.eindoordeel}
-                  </Typography>
-                </>
-              )}
-            </CardContent>
-          </Card>
-
+        {/* Sidebar with Vacancy Source Information */}
+        <Grid item xs={12} lg={4}>
           <Card>
-            <CardHeader title="Vacancy Information" />
+            <CardHeader 
+              title="Vacancy Source" 
+              sx={{
+                bgcolor: 'background.paper',
+                borderBottom: '1px solid',
+                borderColor: 'divider'
+              }}
+            />
             <CardContent>
               <Typography variant="body2" gutterBottom>
                 <strong>URL:</strong>{' '}
-                <a href={`https://${vacancy.URL}`} target="_blank" rel="noopener noreferrer">
+                <a 
+                  href={`https://${vacancy.URL}`} 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  sx={{ 
+                    color: 'primary.main', 
+                    textDecoration: 'none',
+                    '&:hover': {
+                      textDecoration: 'underline'
+                    }
+                  }}
+                >
                   {vacancy.URL}
                 </a>
               </Typography>
+              <Divider sx={{ my: 1.5 }} />
               <Typography variant="body2" gutterBottom>
                 <strong>AI Model:</strong> {vacancy.Model || 'Not specified'}
               </Typography>
               <Typography variant="body2" gutterBottom>
                 <strong>Version:</strong> {vacancy.Version || 'Not specified'}
               </Typography>
+              <Typography variant="body2" gutterBottom>
+                <strong>Top Match Score:</strong> {vacancy.Top_Match || 0}%
+              </Typography>
+
+              {vacancy.Checked_resumes && (
+                <>
+                  <Divider sx={{ my: 1.5 }} />
+                  <Typography variant="subtitle1" gutterBottom>
+                    <strong>Resumes Evaluated:</strong> {vacancy.Checked_resumes.split(',').length}
+                  </Typography>
+                  <Box sx={{ mb: 2, display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                    {vacancy.Checked_resumes.split(',').map((name) => (
+                      <Chip
+                        key={name}
+                        label={name.trim()}
+                        size="small"
+                        sx={{ 
+                          bgcolor: 'primary.light', 
+                          color: 'primary.contrastText',
+                          borderRadius: '4px',
+                          '&:hover': {
+                            bgcolor: 'primary.main',
+                          }
+                        }}
+                      />
+                    ))}
+                  </Box>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </Grid>
+
+        {/* Match Details - Full Width Section */}
+        <Grid item xs={12}>
+          <Card sx={{ mb: 3 }}>
+            <CardHeader
+              title="Match Details"
+              sx={{
+                bgcolor: 'background.paper',
+                borderBottom: '1px solid',
+                borderColor: 'divider'
+              }}
+            />
+            <CardContent>
+              {!vacancy.Checked_resumes && (
+                <Typography variant="body2" color="text.secondary">
+                  No resumes have been evaluated yet
+                </Typography>
+              )}
+
+              {/* Simple JSON formatted display of match details */}
+              <Box sx={{ mb: 4 }}>
+                <Typography variant="h6" gutterBottom sx={{ fontWeight: 'bold' }}>
+                  Match Details:
+                </Typography>
+                <Box sx={{ 
+                  p: 3, 
+                  bgcolor: 'background.default', 
+                  borderRadius: 2, 
+                  border: '1px solid', 
+                  borderColor: 'divider' 
+                }}>
+                  <pre style={{ 
+                    margin: 0, 
+                    padding: 0, 
+                    overflow: 'auto', 
+                    maxHeight: '800px',
+                    fontSize: '14px',
+                    fontFamily: 'monospace',
+                    whiteSpace: 'pre',
+                    wordBreak: 'break-all'
+                  }}>
+                    {(() => {
+                      // Simple format JSON data from Match_Toelichting
+                      if (vacancy.Match_Toelichting) {
+                        // Handle character-by-character object first
+                        if (typeof vacancy.Match_Toelichting === 'object' && 
+                            !Array.isArray(vacancy.Match_Toelichting)) {
+                          
+                          // Check for character-by-character data
+                          const keys = Object.keys(vacancy.Match_Toelichting);
+                          const isNumericKeys = keys.every(key => !isNaN(parseInt(key)));
+                          
+                          if (isNumericKeys) {
+                            // Sort the keys numerically to ensure correct order
+                            const sortedKeys = keys.map(Number).sort((a, b) => a - b);
+                            
+                            // Combine characters into a single string
+                            const combinedString = sortedKeys.map(key => 
+                              vacancy.Match_Toelichting[key.toString()]
+                            ).join('');
+                            
+                            // Handle double-encoded JSON (string with escape sequences and quotes)
+                            if (combinedString.startsWith('"') && 
+                                (combinedString.includes('\\n') || combinedString.includes('\\{'))) {
+                              try {
+                                // Remove outer quotes and unescape
+                                const unquoted = combinedString.slice(1, -1);
+                                // Replace all escaped characters
+                                const unescaped = unquoted
+                                  .replace(/\\"/g, '"')   // Replace \" with "
+                                  .replace(/\\\\/g, '\\') // Replace \\ with \
+                                  .replace(/\\n/g, '\n')  // Replace \n with actual newlines
+                                  .replace(/\\t/g, '\t')  // Replace \t with actual tabs
+                                  .replace(/\\r/g, '\r'); // Replace \r with actual carriage returns
+                                
+                                try {
+                                  // Try to parse and format
+                                  const parsedJson = JSON.parse(unescaped);
+                                  return JSON.stringify(parsedJson, null, 2);
+                                } catch {
+                                  // If parsing fails, return the unescaped string with newlines preserved
+                                  return unescaped;
+                                }
+                              } catch {
+                                // If unescaping fails, return the combined string
+                                return combinedString;
+                              }
+                            } else {
+                              // Not a double-encoded string, format directly
+                              try {
+                                const parsedJson = JSON.parse(combinedString);
+                                return JSON.stringify(parsedJson, null, 2);
+                              } catch {
+                                return combinedString;
+                              }
+                            }
+                          } else {
+                            // Regular object
+                            return JSON.stringify(vacancy.Match_Toelichting, null, 2);
+                          }
+                        } else if (typeof vacancy.Match_Toelichting === 'string') {
+                          // Handle string data
+                          
+                          // Case 1: Double-encoded JSON string
+                          if (vacancy.Match_Toelichting.startsWith('"') && 
+                              (vacancy.Match_Toelichting.includes('\\n') || 
+                               vacancy.Match_Toelichting.includes('\\{'))) {
+                            try {
+                              // Remove quotes and unescape
+                              const unquoted = vacancy.Match_Toelichting.slice(1, -1);
+                              // Replace all escaped characters
+                              const unescaped = unquoted
+                                .replace(/\\"/g, '"')   // Replace \" with "
+                                .replace(/\\\\/g, '\\') // Replace \\ with \
+                                .replace(/\\n/g, '\n')  // Replace \n with actual newlines
+                                .replace(/\\t/g, '\t')  // Replace \t with actual tabs
+                                .replace(/\\r/g, '\r'); // Replace \r with actual carriage returns
+                              
+                              try {
+                                // Try to parse and format
+                                const parsedJson = JSON.parse(unescaped);
+                                return JSON.stringify(parsedJson, null, 2);
+                              } catch {
+                                // If parsing fails, return the unescaped string with newlines preserved
+                                return unescaped;
+                              }
+                            } catch {
+                              // If unescaping fails, check if it's JSON already
+                              try {
+                                const parsedJson = JSON.parse(vacancy.Match_Toelichting);
+                                return JSON.stringify(parsedJson, null, 2);
+                              } catch {
+                                return vacancy.Match_Toelichting;
+                              }
+                            }
+                          } else {
+                            // Regular string, try JSON parsing
+                            try {
+                              const parsedJson = JSON.parse(vacancy.Match_Toelichting);
+                              return JSON.stringify(parsedJson, null, 2);
+                            } catch {
+                              // Not JSON, return as is
+                              return vacancy.Match_Toelichting;
+                            }
+                          }
+                        } else {
+                          // Any other type
+                          return String(vacancy.Match_Toelichting);
+                        }
+                      }
+                      
+                      return "No match details available";
+                    })()}
+                  </pre>
+                </Box>
+              </Box>
             </CardContent>
           </Card>
         </Grid>

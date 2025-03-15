@@ -94,8 +94,19 @@ class SchedulerService:
     
     def run_process(self):
         """Run the combined process - the scheduler already manages when to run it"""
-        now = datetime.datetime.now()
-        logger.info(f"Scheduler running process at {now} (hour={now.hour}, minute={now.minute}, day={now.strftime('%a').lower()})")
+        # Add a timestamp tracker to prevent duplicate runs
+        current_time = datetime.datetime.now()
+        
+        # Check if we've already run a process in this minute or hour
+        current_minute_key = current_time.strftime("%Y-%m-%d %H:%M")
+        if hasattr(self, '_last_process_run') and self._last_process_run == current_minute_key:
+            logger.info(f"Process already ran at {self._last_process_run}, skipping duplicate run")
+            return
+            
+        # Mark this minute as having a process run
+        self._last_process_run = current_minute_key
+        
+        logger.info(f"Scheduler running process at {current_time} (hour={current_time.hour}, minute={current_time.minute}, day={current_time.strftime('%a').lower()})")
         
         # Import the combined process function
         try:
@@ -151,9 +162,9 @@ class SchedulerService:
                     # Log all scheduled times since there will be fewer of them
                     logger.info(f"Scheduled job: {day} at {job_time}")
         
-        # Start the scheduler thread
+        # Start the scheduler thread as non-daemon thread (we're using dedicated container now)
         self.is_running = True
-        self.scheduler_thread = Thread(target=self._run_scheduler, daemon=True)
+        self.scheduler_thread = Thread(target=self._run_scheduler, daemon=False)
         self.scheduler_thread.start()
         
         logger.info(f"Scheduler started with {total_jobs} jobs scheduled at {len(scheduled_hours)} times per day, every {self.interval_hours} hours, on {', '.join(self.days)}")
@@ -163,24 +174,29 @@ class SchedulerService:
         if next_run:
             logger.info(f"Next scheduled run: {next_run}")
             
-        # Check if we're already in a time window when the app is starting
-        # If so, run the process once immediately
-        now = datetime.datetime.now()
-        current_hour = now.hour
-        current_minute = now.minute
-        current_day = now.strftime("%a").lower()
-        
-        # Check if this is a time we would normally run (exact hour match)
-        in_active_window = (
-            current_hour in scheduled_hours and 
-            current_day in self.days and 
-            current_minute < 5  # Allow a 5-minute window after the hour
-        )
-        
-        if in_active_window:
-            logger.info(f"We're in an active window at {now}, running process immediately")
-            # Start in a separate thread to not block
-            Thread(target=self.run_process, daemon=True).start()
+        # Only check for active window and run process immediately during initial startup,
+        # not during configuration updates
+        if not hasattr(self, '_initial_startup_done'):
+            # Mark that we've done the initial startup check
+            self._initial_startup_done = True
+            
+            now = datetime.datetime.now()
+            current_hour = now.hour
+            current_minute = now.minute
+            current_day = now.strftime("%a").lower()
+            
+            # Check if this is a time we would normally run (exact hour match)
+            in_active_window = (
+                current_hour in scheduled_hours and 
+                current_day in self.days and 
+                current_minute < 5  # Allow a 5-minute window after the hour
+            )
+            
+            if in_active_window:
+                logger.info(f"We're in an active window at {now}, running process immediately")
+                # Start in a separate thread to not block
+                # Use daemon=True to run in background
+                Thread(target=self.run_process, daemon=True).start()
             
         return True
     

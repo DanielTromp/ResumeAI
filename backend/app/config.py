@@ -389,6 +389,9 @@ Let op: je output moet een geldig JSON-object zijn, niet alleen de waarden.
         sys.exit(1)
 
 
+# Get frontend URL from environment variable
+FRONTEND_URL = get_env_or_default("FRONTEND_URL", "http://localhost:3000")
+
 # Create the configuration
 config = create_config()
 

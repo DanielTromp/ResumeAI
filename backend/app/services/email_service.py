@@ -14,7 +14,7 @@ from email.mime.multipart import MIMEMultipart
 from typing import List, Dict, Optional, Any, Union
 from datetime import datetime
 
-from app.config import email_config, EMAIL_ENABLED
+from app.config import email_config, EMAIL_ENABLED, FRONTEND_URL
 
 logger = logging.getLogger(__name__)
 
@@ -265,7 +265,7 @@ class EmailService:
             
             # Create links with styling
             spinweb_link = f"https://{url}" if url else "#"
-            detail_link = f"http://localhost:3000/vacancies/{vacancy_id}" if vacancy_id else "#"
+            detail_link = f"{FRONTEND_URL}/vacancies/{vacancy_id}" if vacancy_id else "#"
             
             # Create styled link buttons
             spinweb_button = f'<a href="{spinweb_link}" target="_blank" style="display:inline-block; padding:4px 8px; background-color:#3498db; color:white; border-radius:4px; text-decoration:none; font-size:12px;">Spinweb</a>'
@@ -325,7 +325,7 @@ Processed Vacancies:
             
             # Create links for text version
             spinweb_link = f"https://{url}" if url else "N/A"
-            detail_link = f"http://localhost:3000/vacancies/{vacancy_id}" if vacancy_id else "N/A"
+            detail_link = f"{FRONTEND_URL}/vacancies/{vacancy_id}" if vacancy_id else "N/A"
             
             text += f"""
 - {functie} at {klant}
