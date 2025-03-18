@@ -120,19 +120,28 @@ api.interceptors.response.use(
 
 // Vacancies API
 export const getVacancies = (params = {}) => {
+  // Add timestamp to bypass any caching
+  const timestamp = new Date().getTime();
+  params._t = timestamp;
   return api.get('/api/vacancies', { params });
 };
 
 export const getVacancyById = (id) => {
-  return api.get(`/api/vacancies/${id}`);
+  // Add timestamp to bypass any caching
+  const timestamp = new Date().getTime();
+  return api.get(`/api/vacancies/${id}?_t=${timestamp}`);
 };
 
 export const updateVacancy = (id, data) => {
-  return api.put(`/api/vacancies/${id}`, data);
+  // Add timestamp to bypass any caching
+  const timestamp = new Date().getTime();
+  return api.put(`/api/vacancies/${id}?_t=${timestamp}`, data);
 };
 
 export const deleteVacancy = (id) => {
-  return api.delete(`/api/vacancies/${id}`);
+  // Add timestamp to bypass any caching
+  const timestamp = new Date().getTime();
+  return api.delete(`/api/vacancies/${id}?_t=${timestamp}`);
 };
 
 export const getVacancyStats = () => {

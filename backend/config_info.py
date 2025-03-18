@@ -78,12 +78,9 @@ EXCLUDED_CLIENTS={excluded_clients}
 PDF_FOLDER={matching.pdf_folder}
 POSTGRES_RESUME_TABLE={matching.resume_table}
 
-# Scheduler Configuration
-SCHEDULER_ENABLED={scheduler.enabled}
-SCHEDULER_START_HOUR={scheduler.start_hour}
-SCHEDULER_END_HOUR={scheduler.end_hour}
-SCHEDULER_INTERVAL_MINUTES={scheduler.interval_minutes}
-SCHEDULER_DAYS={scheduler_days}
+# Cron-based Processing
+# The scheduled process has been moved to system cron
+# No configuration needed here - use crontab -e to configure
 
 # The prompt template can be overridden here or provided in app/prompt_template.txt
 # RESUME_PROMPT_TEMPLATE=your custom prompt template here

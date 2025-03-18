@@ -1810,10 +1810,219 @@ async def main(cron_mode=False):
         
         # Run the main process
         await spider_vacatures()
+        
+        # Process existing vacancies with "Nieuw" status
+        await process_existing_new_vacancies()
 
         progress_logger.info("✅ Process completed successfully!")
     except Exception as e:
         progress_logger.error(f"❌ Error in combined process: {str(e)}", exc_info=True)
+
+async def process_existing_new_vacancies():
+    """
+    Process existing vacancies in the database with "Nieuw" status.
+    Fetches vacancies from the database, generates embeddings, finds matching resumes,
+    and updates their status based on the results.
+    """
+    progress_logger.info("🔍 Checking for existing vacancies with 'Nieuw' status...")
+    
+    try:
+        # Connect to PostgreSQL
+        from app.db_init import get_connection
+        conn = get_connection()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        
+        # Query vacancies with "Nieuw" status
+        cursor.execute("""
+            SELECT id, url, functie, klant, functieomschrijving, status, branche, regio, uren, tarief
+            FROM vacancies 
+            WHERE status = 'Nieuw'
+        """)
+        
+        new_vacancies = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        
+        progress_logger.info(f"Found {len(new_vacancies)} vacancies with 'Nieuw' status")
+        
+        if not new_vacancies:
+            return
+            
+        # Process each vacancy
+        for i, vacancy in enumerate(new_vacancies):
+            vacancy_id = vacancy['id']
+            db_url = vacancy['url']
+            vacancy_data = dict(vacancy)
+            
+            progress_logger.info(f"\n=== Processing existing vacancy {i+1}/{len(new_vacancies)} ===")
+            progress_logger.info(f"Vacancy ID: {vacancy_id}, URL: {db_url}")
+            
+            # Check if vacancy has a description
+            vacancy_text = vacancy_data.get("functieomschrijving", "")
+            if not vacancy_text:
+                progress_logger.warning(f"⚠️ Geen functiebeschrijving gevonden voor {db_url}, markeren als 'AI afgewezen'.")
+                
+                # Update PostgreSQL with rejection status
+                try:
+                    conn = get_connection()
+                    cursor = conn.cursor()
+                    
+                    cursor.execute(
+                        """
+                        UPDATE vacancies 
+                        SET status = 'AI afgewezen',
+                            checked_resumes = '',
+                            top_match = 0,
+                            match_toelichting = %s,
+                            updated_at = NOW()
+                        WHERE id = %s
+                        """,
+                        (json.dumps({"reason": "Geen functiebeschrijving gevonden"}), vacancy_id)
+                    )
+                    
+                    conn.commit()
+                    cursor.close()
+                    conn.close()
+                    progress_logger.info(f"✅ Vacancy without function description marked as AI afgewezen in PostgreSQL")
+                except Exception as pg_error:
+                    progress_logger.error(f"❌ Error saving rejection status for vacancy without description: {str(pg_error)}")
+                    if 'conn' in locals() and conn:
+                        conn.rollback()
+                        conn.close()
+                
+                # Skip to the next vacancy
+                continue
+            
+            # Prepare vacancy for embedding
+            try:
+                progress_logger.info(f"Preparing vacancy text for embedding (length: {len(vacancy_text)})")
+                
+                # Call OpenAI to create an embedding for the vacancy text
+                model = "text-embedding-3-small"
+                token_usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+                
+                # Create embedding for the vacancy
+                response = client_openai.embeddings.create(
+                    input=vacancy_text[:7500],  # Limit to first ~7500 chars to avoid token limits
+                    model=model
+                )
+                
+                # Get the embedding vector
+                embedding = response.data[0].embedding
+                
+                # Update token usage
+                token_usage["input_tokens"] += response.usage.prompt_tokens
+                token_usage["output_tokens"] += response.usage.total_tokens - response.usage.prompt_tokens
+                token_usage["total_tokens"] += response.usage.total_tokens
+                
+                progress_logger.info(f"⚙️ Generated embedding (model: {model}, tokens: {token_usage['total_tokens']})")
+                
+                # Use PostgreSQL to find matching resumes using vector search
+                from app.db_init import get_connection
+                pg_conn = get_connection()
+                pg_cursor = pg_conn.cursor()
+                
+                match_threshold = 0.35  # Cosine similarity threshold
+                match_limit = 10  # Maximum number of matches to return
+                
+                # Call the PostgreSQL function to get matches
+                pg_cursor.execute(
+                    """
+                    SELECT * FROM match_resumes(%s::vector, %s, %s)
+                    """,
+                    (embedding, match_threshold, match_limit)
+                )
+                
+                # Get the query results
+                query_rows = pg_cursor.fetchall()
+                
+                if not query_rows:
+                    progress_logger.warning(f"⚠️ No CV matches found")
+                    
+                    # Update PostgreSQL with rejection status
+                    pg_cursor.execute(
+                        """
+                        UPDATE vacancies 
+                        SET status = 'AI afgewezen',
+                            checked_resumes = '',
+                            top_match = 0,
+                            match_toelichting = %s,
+                            updated_at = NOW()
+                        WHERE id = %s
+                        """,
+                        (json.dumps({"reason": "Geen matches gevonden"}), vacancy_id)
+                    )
+                    
+                    pg_conn.commit()
+                    pg_cursor.close()
+                    pg_conn.close()
+                    progress_logger.info(f"Rejection status saved to PostgreSQL for {db_url}")
+                    continue
+                
+                # Process query results
+                query_data = []
+                for row in query_rows:
+                    name, cv_chunk, similarity = row
+                    score = round(similarity * 100)
+                    query_data.append({
+                        "name": name,
+                        "cv_chunk": cv_chunk,
+                        "score": score,
+                        "similarity": similarity
+                    })
+                
+                progress_logger.info(f"🎯 Found {len(query_data)} matching CVs with similarity > {match_threshold}")
+                for i, match in enumerate(sorted(query_data, key=lambda x: x["score"], reverse=True)[:3]):
+                    progress_logger.info(f"  Match {i+1}: {match['name']} (Score: {match['score']}%)")
+                
+                # Process the vacancy with the matches - note process_vacancy is not async
+                vacancy_result, token_usage = process_vacancy(vacancy_id, vacancy_text, query_data)
+                
+                # Get values for DB update
+                new_status = vacancy_result.get("Status", "Open")
+                top_match = vacancy_result.get("Top_Match", 0)
+                match_toelichting = vacancy_result.get("Match_Toelichting", {})
+                checked_resumes = vacancy_result.get("Checked_resumes", "")
+                
+                # Save results to PostgreSQL
+                pg_cursor.execute(
+                    """
+                    UPDATE vacancies 
+                    SET status = %s,
+                        checked_resumes = %s,
+                        top_match = %s,
+                        match_toelichting = %s,
+                        updated_at = NOW()
+                    WHERE id = %s
+                    """,
+                    (
+                        new_status,
+                        checked_resumes,
+                        top_match,
+                        json.dumps(match_toelichting),
+                        vacancy_id
+                    )
+                )
+                
+                pg_conn.commit()
+                pg_cursor.close()
+                pg_conn.close()
+                
+                progress_logger.info(f"✅ Processed vacancy {vacancy_id} - new status: {new_status}, top match: {top_match}%")
+                
+            except Exception as e:
+                progress_logger.error(f"❌ Error processing vacancy {vacancy_id}: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                # Continue with the next vacancy
+                continue
+        
+        progress_logger.info(f"✅ Completed processing {len(new_vacancies)} existing vacancies with 'Nieuw' status")
+        
+    except Exception as e:
+        progress_logger.error(f"❌ Error in process_existing_new_vacancies: {str(e)}")
+        import traceback
+        traceback.print_exc()
 
 if __name__ == "__main__":
     # Parse command line arguments

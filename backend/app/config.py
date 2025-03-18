@@ -111,23 +111,13 @@ class MatchingConfig(BaseModel):
 
 
 class SchedulerConfig(BaseModel):
-    """Scheduler configuration."""
-    enabled: bool = Field(default=False, description="Enable the scheduler")
-    start_hour: int = Field(default=6, ge=0, le=23, description="Hour to start running (0-23)")
-    end_hour: int = Field(default=20, ge=0, le=23, description="Hour to stop running (0-23)")
-    interval_minutes: int = Field(default=60, ge=15, description="Interval between runs in minutes")
-    days: List[str] = Field(default=["mon", "tue", "wed", "thu", "fri"], 
-                            description="Days of the week to run")
-
-    @field_validator('days')
-    @classmethod
-    def validate_days(cls, v: List[str]) -> List[str]:
-        """Validate that days are valid."""
-        valid_days = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
-        for day in v:
-            if day.lower() not in valid_days:
-                raise ValueError(f"Invalid day: {day}. Must be one of {valid_days}")
-        return [day.lower() for day in v]
+    """Placeholder for backward compatibility. Scheduler has been replaced by cron."""
+    enabled: bool = Field(default=False, description="Scheduler has been replaced by cron")
+    # Minimal fields to maintain backward compatibility
+    start_hour: int = Field(default=0, description="No longer used - use cron")
+    end_hour: int = Field(default=0, description="No longer used - use cron")
+    interval_minutes: int = Field(default=0, description="No longer used - use cron")
+    days: List[str] = Field(default=[], description="No longer used - use cron")
 
 
 class EmailConfig(BaseModel):
@@ -170,7 +160,7 @@ class AppConfig(BaseModel):
     # Matching configuration
     matching: MatchingConfig
     
-    # Scheduler configuration
+    # Scheduler configuration (maintained for backward compatibility)
     scheduler: SchedulerConfig
     
     # Email configuration
@@ -347,11 +337,11 @@ Let op: je output moet een geldig JSON-object zijn, niet alleen de waarden.
             "resume_table": get_env_or_default("POSTGRES_RESUME_TABLE", "resumes")
         },
         "scheduler": {
-            "enabled": get_env_or_default("SCHEDULER_ENABLED", "false").lower() == "true",
-            "start_hour": int(get_env_or_default("SCHEDULER_START_HOUR", "6")),
-            "end_hour": int(get_env_or_default("SCHEDULER_END_HOUR", "20")),
-            "interval_minutes": int(get_env_or_default("SCHEDULER_INTERVAL_MINUTES", "60")),
-            "days": get_env_or_default("SCHEDULER_DAYS", "mon,tue,wed,thu,fri").lower().split(",")
+            "enabled": False,  # Always disabled - cron is now used instead
+            "start_hour": 0,
+            "end_hour": 0,
+            "interval_minutes": 0,
+            "days": []
         },
         "email": {
             "enabled": get_env_or_default("EMAIL_ENABLED", "false").lower() == "true",

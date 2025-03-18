@@ -129,7 +129,8 @@ const VacancyDetail = () => {
       try {
         setLoading(true);
         await deleteVacancy(id);
-        navigate('/vacancies');
+        // Add a state parameter to the navigation to indicate a refresh is needed
+        navigate('/vacancies', { state: { refreshNeeded: true, action: 'deleted' } });
       } catch (err) {
         console.error('Error deleting vacancy:', err);
         setError('Failed to delete vacancy. Please try again later.');

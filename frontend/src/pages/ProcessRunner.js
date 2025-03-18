@@ -19,8 +19,7 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import axios from 'axios';
 
-// Scheduler has been removed
-// import SchedulerStatus from '../components/SchedulerStatus';
+// The scheduler has been replaced by system cron
 
 const ProcessRunner = () => {
   const [loading, setLoading] = useState(false);

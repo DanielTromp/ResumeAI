@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Link as RouterLink, useSearchParams } from 'react-router-dom';
+import { Link as RouterLink, useSearchParams, useLocation } from 'react-router-dom';
 import {
   Container,
   Paper,
@@ -23,15 +23,21 @@ import {
   Select,
   MenuItem,
   TableSortLabel,
+  IconButton,
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import AddIcon from '@mui/icons-material/Add';
 import VisibilityIcon from '@mui/icons-material/Visibility';
+import RefreshIcon from '@mui/icons-material/Refresh';
 import { getVacancies } from '../utils/api';
 
 const VacanciesList = () => {
   const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
   const initialStatus = searchParams.get('status') || '';
+  
+  // Check if we need to refresh due to navigation from another page
+  const [notification, setNotification] = useState(null);
 
   const [vacancies, setVacancies] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -78,36 +84,62 @@ const VacanciesList = () => {
     }
   };
 
-  useEffect(() => {
-    const fetchVacancies = async () => {
-      try {
-        setLoading(true);
-        // Prepare query parameters
-        const params = {
-          skip: page * rowsPerPage,
-          limit: rowsPerPage
-        };
-        
-        if (statusFilter) {
-          params.status = statusFilter;
-        }
-
-        console.log('Fetching vacancies with params:', params);
-        const response = await getVacancies(params);
-        
-        console.log(`Received ${response.data.items.length} vacancies with total ${response.data.total}`);
-        setVacancies(response.data.items);
-        setTotalVacancies(response.data.total);
-        setLoading(false);
-      } catch (err) {
-        console.error('Error fetching vacancies:', err);
-        setError('Failed to load vacancies. Please try again later.');
-        setLoading(false);
+  // Define fetchVacancies as a memoized function that can be called manually
+  const fetchVacancies = React.useCallback(async () => {
+    try {
+      setLoading(true);
+      // Prepare query parameters
+      const params = {
+        skip: page * rowsPerPage,
+        limit: rowsPerPage
+      };
+      
+      if (statusFilter) {
+        params.status = statusFilter;
       }
-    };
 
-    fetchVacancies();
+      console.log('Fetching vacancies with params:', params);
+      const response = await getVacancies(params);
+      
+      console.log(`Received ${response.data.items.length} vacancies with total ${response.data.total}`);
+      setVacancies(response.data.items);
+      setTotalVacancies(response.data.total);
+      setLoading(false);
+    } catch (err) {
+      console.error('Error fetching vacancies:', err);
+      setError('Failed to load vacancies. Please try again later.');
+      setLoading(false);
+    }
   }, [page, rowsPerPage, statusFilter]);
+
+  // Use effect to fetch vacancies on mount and when dependencies change
+  useEffect(() => {
+    fetchVacancies();
+  }, [fetchVacancies]);
+  
+  // Check if we came from a delete operation and need to refresh
+  useEffect(() => {
+    if (location.state?.refreshNeeded) {
+      // Clear the location state so we don't trigger multiple refreshes
+      window.history.replaceState({}, document.title);
+      
+      // Show notification
+      if (location.state.action === 'deleted') {
+        setNotification({ 
+          type: 'success', 
+          message: 'Vacancy was successfully deleted' 
+        });
+        
+        // Clear notification after 3 seconds
+        setTimeout(() => {
+          setNotification(null);
+        }, 3000);
+      }
+      
+      // Refresh the data
+      fetchVacancies();
+    }
+  }, [location, fetchVacancies]);
 
   // Update URL when status filter changes
   useEffect(() => {
@@ -238,9 +270,20 @@ const VacanciesList = () => {
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4" component="h1">
-          Vacancies
-        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+          <Typography variant="h4" component="h1">
+            Vacancies
+          </Typography>
+          <IconButton 
+            color="primary" 
+            onClick={fetchVacancies} 
+            disabled={loading}
+            aria-label="refresh vacancies"
+            sx={{ ml: 2 }}
+          >
+            <RefreshIcon />
+          </IconButton>
+        </Box>
         <Button
           variant="contained"
           color="primary"
@@ -255,6 +298,12 @@ const VacanciesList = () => {
       {error && (
         <Alert severity="error" sx={{ mb: 3 }}>
           {error}
+        </Alert>
+      )}
+      
+      {notification && (
+        <Alert severity={notification.type} sx={{ mb: 3 }}>
+          {notification.message}
         </Alert>
       )}
 
