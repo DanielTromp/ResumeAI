@@ -380,78 +380,24 @@ const Settings = () => {
                 />
               </Grid>
 
-              {/* Scheduler Configuration */}
+              {/* Scheduler Configuration - Removed */}
               <Grid item xs={12}>
                 <Typography variant="h6" gutterBottom sx={{ mt: 2 }}>
-                  Scheduler Configuration
+                  Cron Configuration
                 </Typography>
                 <Divider sx={{ mb: 2 }} />
               </Grid>
               
-              <Grid item xs={12} md={4}>
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={settings.scheduler_enabled === true || settings.scheduler_enabled === "true"}
-                      onChange={(e) => handleInputChange({
-                        target: { name: 'scheduler_enabled', value: e.target.checked }
-                      })}
-                      name="scheduler_enabled"
-                      color="primary"
-                    />
-                  }
-                  label="Enable Automatic Process Runs"
-                />
-              </Grid>
-              
-              <Grid item xs={12} md={4}>
-                <TextField
-                  fullWidth
-                  label="Run Interval (minutes)"
-                  name="scheduler_interval_minutes"
-                  value={settings.scheduler_interval_minutes}
-                  onChange={handleInputChange}
-                  type="number"
-                  inputProps={{ min: 60, step: 60 }}
-                  helperText="Enter in minutes (60 = 1 hour, 300 = 5 hours). Minimum 60 minutes."
-                />
-              </Grid>
-              
-              <Grid item xs={12} md={4}>
-                <TextField
-                  fullWidth
-                  label="Active Days"
-                  name="scheduler_days"
-                  value={settings.scheduler_days}
-                  onChange={handleInputChange}
-                  helperText="e.g., mon,tue,wed,thu,fri"
-                />
-              </Grid>
-              
-              <Grid item xs={12} md={6}>
-                <TextField
-                  fullWidth
-                  label="Start Hour (0-23)"
-                  name="scheduler_start_hour"
-                  value={settings.scheduler_start_hour}
-                  onChange={handleInputChange}
-                  type="number"
-                  inputProps={{ min: 0, max: 23, step: 1 }}
-                  helperText="Active period start time (24h format)"
-                />
-              </Grid>
-              
-              <Grid item xs={12} md={6}>
-                <TextField
-                  fullWidth
-                  label="End Hour (0-23)"
-                  name="scheduler_end_hour"
-                  value={settings.scheduler_end_hour}
-                  onChange={handleInputChange}
-                  type="number"
-                  inputProps={{ min: 0, max: 23, step: 1 }}
-                  helperText="Active period end time (24h format)"
-                />
+              <Grid item xs={12}>
+                <Alert severity="info" sx={{ mb: 2 }}>
+                  <Typography variant="body1" fontWeight="bold">Scheduler has been removed</Typography>
+                  <Typography variant="body2">
+                    The process is now configured to run via system cron. Contact your administrator for schedule changes.
+                  </Typography>
+                  <Typography variant="body2" sx={{ mt: 1 }}>
+                    Sample cron command: <code>0 9,13,17 * * 1-5 docker exec resumeai-backend-1 python -m app.combined_process</code>
+                  </Typography>
+                </Alert>
               </Grid>
 
               {/* Email Settings */}

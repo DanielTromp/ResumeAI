@@ -35,8 +35,8 @@ from app.db_init import initialize_database, get_connection
 # Import database utilities
 from app.db_interfaces.postgres import rebuild_vacancy_statistics
 
-# Import scheduler service
-from app.services.scheduler_service import scheduler_service
+# Scheduler service has been removed
+# from app.services.scheduler_service import scheduler_service
 
 # Create startup and shutdown events
 @asynccontextmanager
@@ -57,28 +57,13 @@ async def lifespan(app: FastAPI):
         import traceback
         traceback.print_exc()
     
-    # Start the scheduler if enabled
-    try:
-        if scheduler_service.enabled:
-            scheduler_service.start()
-            print(f"✅ Scheduler started with {len(scheduler_service.days)} active days")
-        else:
-            print("⚠️ Scheduler is disabled. Enable it in settings to automatically run the process.")
-    except Exception as e:
-        print(f"⚠️ Error starting scheduler: {str(e)}")
-        import traceback
-        traceback.print_exc()
+    # Scheduler has been removed
+    print("ℹ️ Scheduler has been removed. Use system cron instead.")
     
     print("✅ Application started successfully")
     yield
     
-    # Clean up resources on shutdown
-    try:
-        if scheduler_service.is_running:
-            scheduler_service.stop()
-            print("✅ Scheduler stopped")
-    except Exception as e:
-        print(f"⚠️ Error stopping scheduler: {str(e)}")
+    # No scheduler to clean up
     
     print("✅ Application shutdown completed")
 

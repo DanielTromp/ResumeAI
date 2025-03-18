@@ -80,7 +80,7 @@ services:
 #    depends_on:
 #      - backend
 
-  scheduler-backup:
+  backup:
     build:
       context: ./backend
       dockerfile: Dockerfile.dev
@@ -99,7 +99,7 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - SPINWEB_USER=${SPINWEB_USER}
       - SPINWEB_PASS=${SPINWEB_PASS}
-      - SCHEDULER_ENABLED=true
+      - SCHEDULER_ENABLED=false
       - TZ=Europe/Amsterdam
     restart: unless-stopped
     entrypoint: /bin/sh
@@ -107,11 +107,6 @@ services:
       -c '
       # Install backup tools
       apk add --no-cache tar gzip findutils
-
-      # Start the scheduler process in the background
-      python -m app.combined_process --cron &
-      SCHEDULER_PID=$$!
-      echo "Started scheduler with PID: $$SCHEDULER_PID"
       
       # Run daily backup job
       while true; do

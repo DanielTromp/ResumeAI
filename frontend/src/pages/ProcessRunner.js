@@ -19,8 +19,8 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import axios from 'axios';
 
-// Import scheduler status component
-import SchedulerStatus from '../components/SchedulerStatus';
+// Scheduler has been removed
+// import SchedulerStatus from '../components/SchedulerStatus';
 
 const ProcessRunner = () => {
   const [loading, setLoading] = useState(false);
@@ -227,8 +227,7 @@ const ProcessRunner = () => {
         </Box>
       </Paper>
       
-      {/* Scheduler Status */}
-      <SchedulerStatus />
+      {/* Scheduler has been removed */}
       
       {/* Notifications */}
       <Snackbar
