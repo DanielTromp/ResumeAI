@@ -227,8 +227,6 @@ const ProcessRunner = () => {
         </Box>
       </Paper>
       
-      {/* Scheduler has been removed */}
-      
       {/* Notifications */}
       <Snackbar
         open={success}

@@ -42,12 +42,6 @@ const Settings = () => {
     match_threshold: '',
     match_count: '',
     resume_prompt_template: '',
-    // Scheduler settings
-    scheduler_enabled: false,
-    scheduler_start_hour: '6',
-    scheduler_end_hour: '20',
-    scheduler_interval_minutes: '60',
-    scheduler_days: 'mon,tue,wed,thu,fri',
     // Email settings
     email_enabled: false,
     email_provider: 'smtp',
@@ -380,25 +374,6 @@ const Settings = () => {
                 />
               </Grid>
 
-              {/* Scheduler Configuration - Removed */}
-              <Grid item xs={12}>
-                <Typography variant="h6" gutterBottom sx={{ mt: 2 }}>
-                  Cron Configuration
-                </Typography>
-                <Divider sx={{ mb: 2 }} />
-              </Grid>
-              
-              <Grid item xs={12}>
-                <Alert severity="info" sx={{ mb: 2 }}>
-                  <Typography variant="body1" fontWeight="bold">Scheduler has been removed</Typography>
-                  <Typography variant="body2">
-                    The process is now configured to run via system cron. Contact your administrator for schedule changes.
-                  </Typography>
-                  <Typography variant="body2" sx={{ mt: 1 }}>
-                    Sample cron command: <code>0 9,13,17 * * 1-5 docker exec resumeai-backend-1 python -m app.combined_process</code>
-                  </Typography>
-                </Alert>
-              </Grid>
 
               {/* Email Settings */}
               <Grid item xs={12} sx={{ mt: 3 }}>
